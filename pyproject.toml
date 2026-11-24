@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "footballsim"
+version = "0.1.0"
+description = "屬性驅動、以真實資料校準的足球比賽模擬引擎"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pydantic>=2.5", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+analysis = ["pandas>=2.0", "matplotlib>=3.7"]
+dev = ["pytest>=7.0", "hypothesis>=6.0"]
+
+[project.scripts]
+footballsim = "footballsim.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

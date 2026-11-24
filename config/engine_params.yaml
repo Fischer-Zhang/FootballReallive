@@ -1,0 +1,543 @@
+# 比賽引擎參數（設計文件附錄 B 的完整版）
+# 原則：程式碼裡沒有魔術數字；所有係數都在這裡，可由校準流程覆寫。
+# 標示「待擬合」者為起始值，M4 以 StatsBomb 開放事件資料重新擬合。
+
+reference_level: 65          # R：頂級聯賽平均球員
+
+composites:                  # 複合能力權重（載入時自動正規化）§4.8
+  short_pass:     {short_passing: .75, technique: .25}
+  long_pass:      {long_passing: .65, technique: .25, vision: .10}
+  through_pass:   {vision: .30, short_passing: .25, long_passing: .20, technique: .25}
+  cross:          {crossing: .65, technique: .20, composure: .15}
+  take_on:        {dribbling: .40, agility: .20, acceleration: .15, balance: .10, first_touch: .10, flair: .05}
+  take_on_def:    {tackling: .25, def_positioning: .25, agility: .15, acceleration: .15, anticipation: .10, strength: .10}
+  tackle:         {tackling: .50, anticipation: .20, strength: .15, acceleration: .15}
+  retain:         {dribbling: .35, first_touch: .25, balance: .25, strength: .15}
+  interception:   {anticipation: .50, def_positioning: .30, acceleration: .20}
+  press:          {work_rate: .30, aggression: .20, acceleration: .20, anticipation: .15, teamwork: .15}
+  loose_ball:     {anticipation: .40, acceleration: .30, aggression: .15, work_rate: .15}
+  finishing:      {finishing: .55, composure: .25, technique: .20}
+  long_shot:      {long_shots: .50, shot_power: .25, technique: .25}
+  header_shot:    {heading: .70, composure: .15, finishing: .15}
+  one_on_one:     {finishing: .40, composure: .40, dribbling: .20}
+  block:          {bravery: .40, def_positioning: .40, anticipation: .20}
+  gk_save:        {gk_reflexes: .35, gk_positioning: .25, gk_diving: .25, gk_handling: .15}
+  gk_1v1:         {gk_one_on_one: .50, gk_positioning: .20, gk_reflexes: .20, acceleration: .10}
+  gk_claim:       {gk_aerial: .70, bravery: .15, gk_handling: .15}
+  gk_kick:        {gk_kicking: .80, technique: .20}
+  gk_short:       {short_passing: .70, composure: .30}
+  gk_throw:       {gk_throwing: 1.0}
+  marking:        {marking: .45, concentration: .20, acceleration: .20, strength: .15}
+  def_quality:    {def_positioning: .50, concentration: .30, teamwork: .20}
+  line_coord:     {concentration: .40, teamwork: .30, def_positioning: .30}
+  att_timing:     {off_the_ball: .60, anticipation: .40}
+  aerial_timing:  {anticipation: .60, heading: .40}
+  penalty:        {penalty: .55, composure: .30, big_match: .15}
+  gk_penalty:     {gk_penalty: .60, anticipation: .20, gk_reflexes: .20}
+  free_kick:      {free_kick: .60, technique: .20, shot_power: .20}
+  delivery:       {set_piece_delivery: .70, technique: .30}
+
+threat:                      # xT：source=grid 使用 StatsBomb 擬合的 16×12 網格（config/xt_grid.yaml）；
+                             # source=analytic 使用下列解析式（備援）
+  source: grid
+  grid_file: xt_grid.yaml
+  v0: 0.006
+  a: 2.4
+  lateral: 0.25
+  w_xg: 0.7
+
+# xG 基礎模型：以 StatsBomb 2,394 次運動戰射門 MLE 擬合（log-loss 0.2818；原起始值 0.2879）
+xg: {b0: 0.3619, b_dist: -0.0987, b_logang: 1.1575, b_head: -1.6986}
+
+shape:                       # §4.4 陣型快照
+  line_base: [22, 28, 33, 38, 43]        # 防線高度 1–5：球在中線時防線距本方球門(m)
+  line_follow_back: 1.3                  # 球在本方半場時防線隨球後退的比例（360：相同可視範圍下各深度的防守人數校準）
+  line_floor0: 8.0                       # 退守下限 = floor0 + floor_k × 球距本方球門（m）：退到禁區線附近就守住（360）
+  line_floor_k: 0.28
+  line_follow_fwd: 0.8                   # 球在對方半場時防線跟進的比例（高位逼搶；上限 55 m）
+  block_length: [26, 28, 30, 33, 36]     # 依壓迫 1–5 的防守區塊縱深(m)
+  fatigue_stretch: 1.5                   # 能量低於 fatigue_e0 後，每少 0.1 縱深拉長 15%
+  fatigue_e0: 0.80
+  block_compress: 0.75                   # 球在本方 compress_dist 內時，區塊縱深最多壓縮的比例（360：整隊退成深而緊的區塊）
+  compress_dist: 55.0
+  def_width: 0.80
+  def_shift: 0.35
+  att_width: [0.75, 0.80, 0.85, 0.90, 0.95]
+  att_shift: 0.20
+  att_front_ahead: 32
+  att_ranks_mid: [0.96, 0.85, 0.72, 0.55, 0.39, 0.19]     # 持球方最前 6 人在「球 → 對方防線」間的比例位置（360 中位數，球 x ≤ 50）
+  att_ranks_final: [0.93, 0.81, 0.67, 0.48, 0.19, -0.19]  # 同上，球 x ≥ 75（前場：後兩人回到球附近）
+  att_ranks_x: [50.0, 75.0]              # 兩組比例之間線性內插的球位置範圍
+  att_back_behind: 22                    # 進攻時後衛線在球後方的距離（360 資料：約 20–25 m）
+  att_back_floor: 13.0                   # 組織進攻時後衛線最深的位置(m)（360 資料）
+  att_back_min: 8.0                      # 球比這更深時（門將持球）後衛線的位置
+  mentality_front: 1.5                   # 心態每 1 級，最前線前推(m)
+  mentality_back: 2.0                    # 心態每 1 級，後防線前推(m)
+  gk_x_min: 1.5
+  gk_x_ratio: 0.12
+  gk_x_max: 16
+  move_sigma: 5.0                        # 無球跑位候選點的離散度(m)
+  front_band: 3.0                        # 陣型位置在越位線前 3 m 內者為「壓線前鋒」
+  front_sigma_x: 0.3                     # 壓線前鋒的縱向移動幅度倍數（主要沿防線橫移）
+  box_run_file: box_runs.yaml            # 禁區跑位的真實站位組合（360 資料，fit360 產生）
+  box_zone_x: 80.0                       # 禁區跑位區域：x ≥ 80 m、|y−34| ≤ 22 m（與 fit360 的真實站位相同定義）
+  box_zone_half: 22.0
+  box_run_min_x: 70.0                    # 球在 x ≥ 70 m 時啟用
+  box_run_sx: 3.0                        # 找相近畫面：球 x 的尺度(m)
+  box_run_sy: 5.0                        # 球 |y−34| 的尺度(m)
+  box_run_k: 15                          # 從最相近的 15 個畫面中抽一個
+  move_open_w: 0.012                     # 開闊度權重（每公尺）
+  move_drift_w: 0.002
+  support_n: 3                           # 往持球者靠近接應的隊友人數
+  support_dist: 8.0                      # 接應距離(m)
+  support_frac: 0.7                      # 往接應點移動的比例（× 團隊配合係數）
+  arrives_late: 0.12                     # 特質「後插上」的前移量（x_rel）
+  mark_radius: 8.0                       # 盯人範圍（360：各方向接應點「被貼身／沒人盯」的比例分布校準）
+  mark_radius_press: 16.0                # 球越深入對方半場，盯人範圍最多再加 16 m（高位逼搶；360 空檔分布校準）
+  mark_weight: 0.5                       # 離球遠時的盯人追蹤比例（360 盯人距離曲線校準）
+  mark_weight_box: 0.95                  # 禁區內的盯人追蹤比例
+  mark_dist_box: 0.6                     # 禁區內盯人距離的倍數
+  mark_ball_w: 0.05                      # 盯人優先順序中「離球距離」的權重
+  mark_ball_scale: 6.0                   # 盯人鬆緊隨「被盯者離球距離」衰減的尺度(m)（360 空檔分布校準）
+  mark_weight_ball: 0.95                 # 離球很近時的盯人追蹤比例（離球遠時為 mark_weight）
+  mark_dist_min: 1.0
+  mark_dist_span: 3.0
+  mark_otb: 0.3                          # 進攻者無球跑位每 +10，盯人距離 +0.3 m（擺脫能力）
+  def_err_min: 0.3                       # 防守站位誤差（360：禁區內盯人距離中位數 2.3 m）
+  def_err_span: 1.2
+  def_err_fatigue: 1.5                   # 站位誤差 × (1 + 此值 × (1 − 能量))
+  lapse_base: 0.004                      # 每事件每名防守者恍神機率基準
+  lapse_mult: 3.0
+  lapse_fatigue: 8.0                     # 能量低於 fatigue_e0 後對恍神機率的放大
+  press_engage: [35, 50, 62, 75, 95]     # 依壓迫 1–5：球距本方球門多遠以內開始逼搶
+  press_phi: [0.15, 0.25, 0.35, 0.45, 0.55]
+  press_phi_passive: 0.08
+  press_passive: true                    # 不逼搶時最近的人仍慢慢靠近持球者（false：留在區域位置）
+  press_extra: [0, 0, 1, 1, 2]           # 依壓迫 1–5：逼搶時另外貼住離球最近接應點的人數
+  press_cut_dist: 2.0                    # 貼防接應點時站在接應者與球之間的距離(m)
+  press_extra_range: 4.0                 # 額外逼搶者最多從比上搶距離再遠 4 m 處趕來
+  press_min_dist: 1.2
+  always_engage: 32.0                    # 球距本方球門 32 m 內一定有人上前封堵
+  jockey_min: 1.0                        # 貼身防守距離 = min + span × (1 − 壓迫強度)（360：持球者與最近對手距離的分布校準）
+  jockey_span: 1.5
+  jockey_box: 0.5                        # 禁區內貼身距離的倍數
+  jockey_lat: 0.0                        # 貼身防守者的側向偏移(m)，引導對手往外
+  cover_dist: 5.0                        # 補位者在貼身者後方的距離
+  cover_lat: 1.5                         # 補位者偏向自己那一側的距離(m)
+  cover_keep_mark: 15.0                  # 補位者若正盯著離球 15 m 內的進攻者，就不離開去補位
+  press_reach_base: 3.0                  # 持球者觸球後到出腳前，上搶者能再逼近的距離(m)（360：持球者受壓分布校準）
+  press_reach_phi: 0.0
+  mentality_press: 0.8                   # 比分情境的心態偏移對壓迫等級的影響
+  def_narrow: 0.25                       # 球靠近本方禁區時防線往中路收縮的比例
+  move_speed_frac: 0.8                   # 事件之間的移動速度 = 最高速 × 此比例 × 體能（防守方再乘投入度）
+  min_move_dt: 0.8                       # 最短移動時間(s)
+  free_reposition_s: 8.0                 # 死球超過此秒數即可完全重新站位
+
+pressure: {sigma: 3.0, c: 0.9, recv_sigma: 2.5}
+
+decision:                    # §4.6；偏好只保留戰術指示（directness、tempo、buildup、width、shot_policy）與球員特質（trait、flair），皆為「最佳選項效用的比例」
+  t_rel: 0.28                            # softmax 溫度（相對於最佳選項的效用）
+  u_floor: 0.004                         # 相對尺度的下限，避免效用接近 0 時過度放大
+  est_noise: 0.6
+  kappa: 1.0
+  kappa_mentality: 0.12
+  counter_bonus: 0.5
+  vision_dist: 30.0
+  vision_base: 20.0
+  directness_bias: 0.08
+  tempo_bias: 0.04
+  shot_policy: 0.12
+  trait_bias: 0.24
+  flair_bias: 0.12
+  min_pass: 3.0
+  max_pass: 65.0
+  decide_time: [0.6, 2.0]                # 持球到出腳的時間(s)；360/事件資料：每分鐘淨比賽時間約 25 次持球動作（每次 2.4 s）
+
+passing:
+  box_fail_corner: 0.077                 # 資料：失敗的禁區傳球（非傳中）變角球的比例
+  byline_fail_corner: 0.116              # 資料：落點 x ≥ 95 m 的失敗傳球變角球的比例
+  byline_x: 95.0
+  k_att: 0.35                            # 傳球能力每 +10，成功率 logit +0.35（模型假設）
+  c_lane: 1.6                            # 僅身後球的執行成功率使用（一般傳球改用 pass_success）
+  lane_sigma0: 1.0
+  lane_sigma_per_m: 0.08                 # 球飛得越遠，防守者越有時間橫移攔截
+  arrive_speed: 4.0                      # 到達壓力：球飛行時防守者朝接球點逼近的速度（m/s；360 擬合時 2/4/6 中概似最高）
+  arrive_react: 0.3                      # 防守者起動前的反應時間（s）
+  flight_speed: 15.0                     # 計算飛行時間用的平均球速（m/s）
+  recv_press_value: 0.5
+  lead: 6.0                              # 傳到跑動路線：接球者往球門方向跑的距離（360：往前傳球時接球者再跑 5–8 m）
+  lead_min_ahead: 3.0                    # 只有位置在傳球者前方 3 m 以上的隊友會這樣接球
+  lead_min_run: 1.5                      # 落點被越位線擋住、跑不到 1.5 m 時不考慮
+  lead_goal_w: 0.4                       # 跑動方向：直線向前，略偏向球門中路
+  ball_speed: 15.0
+  ctrl_time: 0.4
+  ft_b0: -3.6
+  ft_press: 1.0
+  ft_k: 0.30
+  out_share: 0.25
+
+carry_propensity:                        # 帶球 ≥ 3 m 的傾向（logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）
+  g0: -3.62
+  g_x: 0.06                              # 每 10 m 往前
+  g_wide: 0.05                           # 離中路每 10 m
+  g_near: 0.27                           # 最近對手距離（m，上限 8）
+  g_space: 0.095                         # 正前方 ±40° 最近對手距離（m，上限 15）
+  align: 0.0
+  k_skill: 0.15                          # 持球能力（retain）每 10 點（模型假設）
+
+pass_success:                            # 傳球成功率（logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋這裡的預設值）
+  s0: 4.8484                              # 地面球：截距
+  s_d: 0.0294                             # 距離（每 10 m）
+  s_d2: 0.0476                            # 距離平方
+  s_lane: -1.8571                         # √路線攔截威脅
+  s_recv: -1.4394                         # √接球點到達壓力
+  s_press: -0.9432                        # √傳球者受壓
+  s_back: 0.5473                          # 回傳（往後 > 3 m）
+  s_gk: -0.1597                           # 傳給本隊門將
+  s_loft: -2.2372                         # 高球（含低平球）：截距差
+  s_loft_lane: 1.7952                     # 高球越過路線，攔截威脅幾乎不影響
+  s_loft_d: -0.3583                       # 高球的額外距離懲罰
+  s_loft_recv: -0.0626
+  ground_max: 45.0                       # 地面球最遠距離（360：45 m 以上的傳球幾乎全是高球）
+  lofted_min: 10.0                       # 10 m 內不挑高球
+  k_comp: 0.1                            # 冷靜每 +10，√受壓的懲罰減 0.1（模型假設）
+
+pass_height:                             # 傳球高度的選擇（踢高球的機率 logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）
+  h0: -3.7702
+  h_d: -0.3541                           # 距離（每 10 m）
+  h_d2: 0.2861
+  h_lane: 2.3914                         # √地面路線攔截威脅：路線被封就挑高
+  h_press: 1.2537                        # √傳球者受壓
+  h_back: -0.6743                        # 回傳
+  h_gk: -0.9507                          # 傳給門將
+  h_own: 0.6967                          # 本方三區
+  h_final: -0.612                        # 進攻三區
+  k_buildup: 0.5                         # 戰術「長傳出球／短傳出球」在本方三區的 logit 增減（模型假設）
+
+through:
+  difficulty: 70
+  depth: 10.0
+  min_space: 6.0
+  b0: 1.4
+  b_dist: 0.045
+  att_react: 0.20
+  def_react: 0.40
+  gk_react: 0.35
+  gk_handicap: 0.15
+  race_noise: 0.15
+  offside_b0: -1.3
+  offside_k: 0.30
+  offside_trap: 0.5
+  max_options: 3
+  breakaway_v0: 0.35                     # 單刀價值 = v0 × exp(−距離/scale)
+  breakaway_scale: 40.0
+
+carry:
+  max_dist: 12.0
+  min_dist: 3.0
+  stop_short: 1.0                        # 在對手能搶到的那一點之前停下（m）
+  step: 0.5                              # 路線取樣間距（m）
+  def_react: 0.6                         # 防守者起動反應時間（s）；預判每 +10 快 0.025 s（360：≥ 3 m 且被逼停的帶球，停點中位數無偏）
+  reach: 1.0                             # 觸球（伸腳）範圍（m）
+  jockey_range: 4.0                      # 持球者與球門之間、此距離內的貼身者邊退邊守，不參與路線封堵（360）
+  speed_frac: 0.75                       # 帶球速度 = 最高速 × 0.75
+  angles: [0.0, 0.55, -0.55, 1.25, -1.25]
+  attempt_b0: 1.2
+  attempt_per_m: 0.45
+  base_tackle: 0.40
+  k_att: 0.30
+  k_def: 0.30
+  loose_share: 0.35
+
+take_on:
+  trigger_dist: 3.5
+  base: 0.47
+  k_att: 0.40
+  k_def: 0.40
+  gain: 3.0
+  cover_radius: 4.0
+  cover_penalty: 0.5
+  duration: 1.6
+  loose_share: 0.30
+  byline_corner: 0.10                    # 資料：禁區附近過人失敗後出底線的比例
+
+shot:                        # §4.10 三階段
+  max_dist: 35.0
+  min_x: 70.0
+  p_ot_base: 0.40
+  k_ot: 0.12
+  k_place: 0.06
+  k_gk: 0.20
+  k_block: 0.30                          # 封堵者複合能力每 10 點的封堵 logit 位移
+  weak_foot_share: 0.25
+  weak_foot_penalty: 12.0
+  one_on_one_dist: 16.0
+  hold_b0: 0.05
+  hold_k: 0.25
+  hold_xg: 2.0
+  parry_corner_share: 0.44
+  block_corner_share: 0.24
+  rebound_retain: 0.45                    # 射門被擋或撲出後的無主球，進攻方拿回的機率（決策時的估計）
+
+cross:                        # 運動戰傳中（360 資料：Euro 2024、WC 2022 共 896 次）
+  min_x: 80.0
+  min_wide: 12.0
+  zone_x: 83.0                           # 目標：禁區與前沿（x ≥ 83 m、|y−34| ≤ 22 m）的跑位者
+  zone_half: 22.0
+  type_depth: 12.0                       # 傳中類型（地面, 高球, 低平）的比例：距底線 ≤ 12 m／更深（資料）
+  type_near: [0.34, 0.51, 0.15]
+  type_far: [0.07, 0.87, 0.06]
+  run_dx: 3.6                            # 接球者從傳中瞬間到觸球點的平均前插（往球門 +，資料）
+  run_dy: 2.4                            # 往遠側的平均移動（資料）
+  ball_speed: 18.0                       # 傳中球的水平速度(m/s)（物理假設）
+  att_react: 0.10                        # 跑位者起動（預判傳中）
+  def_react: 0.45                        # 防守者反應（與帶球封堵相同，360 擬合）
+  reach: 1.0                             # 爭頂／觸球範圍(m)
+  gk_zone_x: 94.0                        # 門將可出擊沒收的區域：x ≥ 94 m、|y−34| ≤ 12 m
+  gk_zone_half: 12.0
+  gk_react: 0.35
+  gk_reach: 1.5                          # 門將用手的範圍(m)
+  c0: -1.343                             # 落點爭奪（360 擬合）：logit = c0 + c_def·Δt防守 + c_gk·Δt門將 + c_high·高球
+  c_def: 0.667                           # 防守者比攻方晚到每 1 秒
+  c_gk: 1.141                            # 門將比攻方晚到每 1 秒（上限 race_cap）
+  c_high: 0.300
+  race_cap: 1.5
+  k: 0.35                                # 傳中能力每 10 點（落點精準、少出界）
+  k_aer: 0.5                             # 假設：高球時爭頂勝率 logit 的權重
+  out_share: [0.030, 0.109, 0.051]       # 傳出界比例（地面, 高球, 低平；資料）
+  out_goal_kick: 0.6                     # 出界中變球門球的比例（其餘為界外球；假設）
+  block_base: 0.25
+  block_radius: 3.0
+  block_corner_share: 0.25
+  head_shot_high: 0.41                   # 高球頂到後直接頭槌攻門（資料：成功後 61.8% 射門 × 66.4% 為頭槌）
+  knockdown: 0.5                         # 其餘頂到的球中，頂給隊友或二點的比例（假設；其餘為控下）
+  gk_punch: 0.42                         # 門將出擊中拍出的比例（資料：拍出 4.0%、沒收 5.5%）
+  def_corner_share: 0.08
+  claim_k: 0.30                          # 角球與間接自由球傳中時門將出擊的能力係數（restarts）
+  contest_dist: 1.25                     # 角球頭槌時最近防守者的平均距離(m)（restarts）
+
+clearance:
+  dist: 40.0
+  out_share: 0.25
+  pressure_min: 0.5
+  corner_share_box: 0.095                # 資料：本方禁區內解圍後由對手開角球的比例
+
+loose_ball: {radius: 10.0, scale: 1.5, k: 0.08}
+
+aerial: {per_cm: 0.07, timing: 0.025, strength: 0.015, bravery: 0.010, jump_a: 35, jump_b: 0.30, gk_reach: 1.33}
+sprint: {vmax_a: 7.6, vmax_b: 0.022, tau_a: 1.0, tau_b: -0.004}
+
+corner:
+  short_share: 0.15
+  deliver_b0: 0.6
+  k: 0.35
+  n_attackers: 5
+  claim_b0: -1.3
+  crowd: 0.85
+  header_shot_share: 0.6                 # 角球爭頂勝出後直接頭槌攻門的比例（其餘為頂傳 / 二點球）
+  repeat_corner: 0.12
+  out_share: 0.15
+
+free_kick:
+  direct_max_dist: 32.0
+  direct_min_x: 75.0
+  direct_max_wide: 22.0
+  direct_share: 0.65
+  b0: -1.0
+  b_dist: 0.095
+  wall_block: 0.25
+
+penalty: {base: 0.77, k_att: 0.25, k_gk: 0.25, save_share: 0.72, importance: 0.3}
+
+foul:                        # §4.16
+  b0: -2.3
+  k_skill: 0.25
+  k_aggr: 0.20
+  k_dirty: 0.15
+  k_fatigue: 0.8
+  booked: -0.5
+  beaten: 0.6
+  dives_trait: 0.3
+  box: -2.8                              # 禁區內防守者會收斂（否則十二碼過多）
+  recv_min: 0.35                         # 接球壓迫值超過此值才有身體對抗
+  recv_b0: -3.2
+  recv_k: 0.8
+  aerial: 0.6
+  att_share_lofted: 0.45                 # 高球爭頂犯規中進攻方犯規的比例
+  att_share_ground: 0.25
+  style: {cautious: -0.4, normal: 0.0, aggressive: 0.35}
+
+card:
+  yellow_b0: -1.9
+  k_aggr: 0.15
+  k_dirty: 0.15
+  k_tackle: 0.15
+  spa: 1.5
+  red_b0: -6.5
+  dogso_red: 0.6
+  dogso_box_red: 0.15
+  booked_factor: 0.25                    # 已吃黃牌者再被判黃牌的機率倍數（2015/16：兩黃變紅 ÷ 黃牌 ≈ 2.3%）
+  dissent_per_min: 0.0028
+  time_wasting_per_min: 0.004
+
+referee: {home_bias: 0.06, card_bias_mult: 1.0}
+
+timing:                      # 秒
+  carry_speed_min: 4.0
+  take_on: 1.6
+  shot: 0.8
+  throw_in: [8, 20]
+  goal_kick: [18, 32]
+  gk_hands: [3, 8]
+  corner: [25, 40]
+  free_kick: [15, 35]
+  free_kick_danger: [40, 70]
+  goal: [55, 85]
+  kickoff: [5, 10]
+  penalty: [60, 100]
+  offside: [15, 25]
+  sub: [20, 35]
+  time_wasting: 1.3
+
+fatigue:                     # §4.13
+  d0: 0.0040
+  role: {GK: 0.35, CB: 0.85, FB: 1.05, DM: 1.0, CM: 1.05, AM: 1.0, W: 1.05, ST: 0.95}
+  press_step: 0.06
+  tempo_step: 0.03
+  heat_threshold: 26.0
+  heat_per_deg: 0.015
+  ht_base: 0.04
+  ht_nf: 0.04
+  physical: {threshold: 0.75, slope: 0.7, floor: 0.80}     # M4 校準：比賽末段衰退加強
+  mental: {threshold: 0.60, slope: 0.5, floor: 0.90}
+  technical_share: 0.5
+
+day_form: {sigma_min: 1.0, sigma_span: 6.0}
+big_match: {threshold: 0.7, points: 4.0}
+morale_points: 3.0
+
+home:                        # §4.18 主場優勢拆成四個機制
+  familiarity: 4.0
+  crowd_composure: 6.0
+  ref_bias: 0.06
+  away_energy: 0.03
+
+game_state:                  # §4.15 比分情境
+  trail_start: 55
+  trail_rate: 15
+  trail_max: 1.2
+  lead_start: 60
+  lead_rate: 20
+  lead_max: 0.7
+  red_card: -0.5
+  strength_scale: 4.0                    # 實力差（位置評分）每 4 點，退守程度減少 100%
+  protect_min: 0.2
+  protect_max: 1.0
+
+manager:
+  energy_threshold: 0.62
+  checks: [60, 70, 78, 85]
+  planned_subs: {60: 1, 70: 3, 80: 4}
+  max_subs: 5
+  max_windows: 3
+
+injury:
+  per_min: 0.00020
+  contact: 0.012
+  forced_off_share: 0.4
+  knock: 0.10
+
+stoppage: {goal: 45, sub: 25, card: 10, penalty: 60, injury: 75, min_first: 1, min_second: 3}
+
+# ---- 資料擬合模型的備援預設（與 config/fitted.yaml 相同；重新擬合後以 fitted.yaml 為準）----
+shot_model:
+  typical: {cone_a: 0.2645, cone_b: 0.0429, near_a: 0.9701, near_b: 0.0856}
+  goal:
+    b0: 0.1203
+    b_dist: -0.0754
+    b_logang: 1.3736
+    b_head: -1.5976
+    b_cone: -0.4003
+    b_near: 0.156
+  block:
+    c0: -1.3184
+    c_cone: 0.658
+    c_near: -0.2423
+    c_dist: 0.0132
+    c_head: -1.2599
+  on_target:
+    e0: 1.1681
+    e_dist: -0.0706
+    e_head: -1.4001
+    e_near: -0.0005
+transitions:
+  cross_fail:
+    n: 1539
+    p_corner: 0.0884
+    p_retain: 0.334
+    p_lose: 0.5776
+    v_retain: 0.03237
+    v_lose: 0.00413
+  shot_miss:
+    n: 2142
+    p_corner: 0.1298
+    p_retain: 0.2106
+    p_lose: 0.6597
+    v_retain: 0.05716
+    v_lose: 0.00415
+  clearance:
+    n: 4686
+    p_corner: 0.0
+    p_retain: 0.2847
+    p_lose: 0.7153
+    v_retain: 0.00576
+    v_lose: 0.02015
+  corner_value: 0.03941
+  corner_goal_rate: 0.03762
+
+# ---- 行為模型：要不要射門／傳中／解圍。係數由 StatsBomb 360 位置特徵擬合（fitted360.yaml 覆蓋這裡的預設值）；
+#      特徵為引擎也算得出的位置量（最近對手距離、射門路線上人數），不用人工標記的「受壓迫」。k_* 為模型假設 ----
+shot_propensity:
+  a0: 4.5
+  a_dist: -0.14
+  a_logang: 2.6
+  a_near: 0.18            # 最近外野防守者每遠 1 m（上限 8 m）
+  align: 0.0              # 事件定義對齊（未使用）
+  k_quality: 1.0          # 假設：射門傾向的 odds 與「封堵相對典型射門」的射門品質 odds 成正比
+  k_dec: 1.0              # 假設：決策每 +10，對射門品質的反應放大 10%
+  k_skill: 0.15           # 射手複合能力每 10 點
+  k_policy: 0.3           # 戰術射門指示每 1 級
+  k_trait: 0.8            # 特質「愛遠射」（距離 > 20 m）
+
+cross_propensity:
+  c0: -0.5
+  c_depth: -0.12
+  c_wide: 0.015
+  c_near: 0.05            # 最近對手每遠 1 m（上限 8 m）
+  align: 0.0              # 事件定義對齊（未使用）
+  k_skill: 0.15           # 傳中複合能力每 10 點
+  k_policy: 0.3           # 戰術寬度每 1 級
+  k_trait: 0.8            # 特質「早傳中」
+
+clear_propensity:         # 本方三區（x ≤ 35 m）持球時
+  k0: 0.0
+  k_x: -0.08
+  k_wide: 0.0
+  k_near: -0.3            # 最近對手越近越常解圍
+  align: 0.0              # 事件定義對齊（未使用）
+
+# 傳球對象選擇（條件 logit）：被選中的機率 ∝ exp(Σ 係數 × 特徵)。係數由 360 資料擬合（fitted360.yaml 覆蓋）；
+# 「要不要傳球」仍由效用比較決定，這裡只決定「傳給誰」。特徵見 decision.pass_choice_features
+pass_choice:
+  enabled: true           # 傳球對象由 360 擬合的條件 logit 決定（「傳球」這一類的機率仍由效用比較）；可視範圍外的選項依 IIA 不影響係數
+  dx: 0.37                # 接球者每往前 10 m
+  dist: -1.6              # 傳球距離每 10 m
+  dist2: 0.07             # 距離平方（/100）
+  space: 1.4              # 接球者身邊空間每 5 m（上限 10 m）
+  lane: -1.0              # 傳球路線攔截威脅
+  back: -0.2              # 回傳（往後 > 3 m）
+  gk: 0.25                # 傳給門將
+  xt_gain: 0.85           # xT 增益每 0.05
+  dx_own: 0.05            # 本方三區時往前的額外權重
+  dx_final: 0.05          # 前場三區時往前的額外權重
+  k_dec: 1.0              # 假設：決策每 +10，越接近資料中的選擇方式（係數放大 10%）

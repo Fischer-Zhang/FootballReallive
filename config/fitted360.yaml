@@ -1,0 +1,80 @@
+# 由 `python -m footballsim statsbomb fit360` 產生，請勿手動修改
+_source: StatsBomb Open Data 360（UEFA Euro 2024、FIFA World Cup 2022，各隨機 25 場）
+_samples:
+  shot: 5357
+  cross: 4455
+  clear: 11655
+  pass_choice: 33179
+  pass_success: 22927
+  carry: 59792
+_pass_choice_fit:
+  _n_passes: 33179
+  _mean_options: 6.98
+  _loglik: -1.2918
+  _loglik_uniform: -1.9122
+_pass_success_fit:
+  _n: 22927
+  _n_all: 40095
+  _completion_all%: 86.4
+  _completion_kept%: 90.1
+  _completion_weighted%: 86.4
+  _weighted_logloss: 0.2493
+_pass_height_fit:
+  _n: 22927
+  _lofted_weighted%: 18.1
+  _weighted_logloss: 0.3314
+shot_propensity:
+  a0: 4.3843
+  a_dist: -0.1129
+  a_logang: 2.9766
+  a_near: 0.2236
+cross_propensity:
+  c0: -0.2841
+  c_depth: -0.1443
+  c_wide: 0.011
+  c_near: 0.172
+clear_propensity:
+  k0: 1.9782
+  k_x: -0.1281
+  k_wide: -0.0814
+  k_near: -0.4447
+pass_choice:
+  dx: 0.3726
+  dist: -1.6241
+  dist2: 0.0672
+  space: 1.3824
+  lane: -1.0633
+  back: -0.1896
+  gk: 0.2667
+  xt_gain: 0.8517
+  dx_own: 0.0543
+  dx_final: 0.0547
+pass_success:
+  s0: 4.9125
+  s_d: 0.0165
+  s_d2: 0.0476
+  s_lane: -1.8326
+  s_recv: -1.4448
+  s_press: -1.0105
+  s_back: 0.5507
+  s_gk: -0.3159
+  s_loft: -2.192
+  s_loft_lane: 1.743
+  s_loft_d: -0.3456
+  s_loft_recv: -0.1019
+pass_height:
+  h0: -3.7702
+  h_d: -0.3541
+  h_d2: 0.2861
+  h_lane: 2.3914
+  h_press: 1.2537
+  h_back: -0.6743
+  h_gk: -0.9507
+  h_own: 0.6967
+  h_final: -0.612
+carry_propensity:
+  g0: -3.6238
+  g_x: 0.0599
+  g_wide: 0.0508
+  g_near: 0.2664
+  g_space: 0.0954

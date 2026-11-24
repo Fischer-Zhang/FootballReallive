@@ -1,0 +1,50 @@
+# 由 `python -m footballsim statsbomb fit` 產生，請勿手動修改
+_source: StatsBomb Open Data（2015/16 五大聯賽完整賽季，隨機抽樣）
+shot_model:
+  goal:
+    b0: 0.1203
+    b_dist: -0.0754
+    b_logang: 1.3736
+    b_head: -1.5976
+    b_cone: -0.4003
+    b_near: 0.156
+  block:
+    c0: -1.3184
+    c_cone: 0.658
+    c_near: -0.2423
+    c_dist: 0.0132
+    c_head: -1.2599
+  on_target:
+    e0: 1.1681
+    e_dist: -0.0706
+    e_head: -1.4001
+    e_near: -0.0005
+  typical:
+    cone_a: 0.2645
+    cone_b: 0.0429
+    near_a: 0.9701
+    near_b: 0.0856
+transitions:
+  cross_fail:
+    n: 1539
+    p_corner: 0.0884
+    p_retain: 0.334
+    p_lose: 0.5776
+    v_retain: 0.03237
+    v_lose: 0.00413
+  shot_miss:
+    n: 2142
+    p_corner: 0.1298
+    p_retain: 0.2106
+    p_lose: 0.6597
+    v_retain: 0.05716
+    v_lose: 0.00415
+  clearance:
+    n: 4686
+    p_corner: 0.0
+    p_retain: 0.2847
+    p_lose: 0.7153
+    v_retain: 0.00576
+    v_lose: 0.02015
+  corner_value: 0.03941
+  corner_goal_rate: 0.03762

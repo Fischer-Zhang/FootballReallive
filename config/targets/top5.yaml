@@ -1,0 +1,495 @@
+source: football-data.co.uk，2022-23/2023-24/2024-25/2025-26，五大聯賽
+top5:
+  matches: 7082
+  goals_pm: 2.8102
+  goals_var_over_mean: 0.996
+  home_goals: 1.5465
+  away_goals: 1.2638
+  H%: 43.7306
+  D%: 25.2612
+  A%: 31.0082
+  0-0%: 6.1706
+  corr_home_away: -0.0739
+  2H_goal_share%: 55.3763
+  shots_pt: 12.6229
+  sot_pt: 4.4073
+  sot_ratio%: 34.9151
+  goals_per_shot%: 11.1331
+  goals_per_sot%: 31.8861
+  home_shots_share%: 55.1008
+  fouls_pt: 11.8778
+  corners_pt: 4.8281
+  yellow_pt: 2.0383
+  red_pm: 0.194
+  home_yellow_share%: 46.6276
+  HT_leader_win%: 73.3632
+  HT_leader_draw%: 17.6872
+  fav_win%: 54.0808
+  total_goals_dist%:
+    0: 6.17
+    1: 16.49
+    2: 23.98
+    3: 22.47
+    4: 15.67
+    5: 8.39
+    6: 4.25
+    7: 2.58
+  favourite_gradient:
+  - implied: 37.8
+    n: 1234
+    win%: 40.0
+    draw%: 30.4
+  - implied: 44.9
+    n: 2338
+    win%: 46.0
+    draw%: 27.8
+  - implied: 54.9
+    n: 1662
+    win%: 56.1
+    draw%: 25.9
+  - implied: 64.7
+    n: 1123
+    win%: 67.2
+    draw%: 20.3
+  - implied: 74.3
+    n: 560
+    win%: 76.8
+    draw%: 16.4
+  - implied: 83.4
+    n: 165
+    win%: 87.3
+    draw%: 7.9
+top5_range:
+  goals_pm:
+  - 2.5401
+  - 3.1904
+  goals_var_over_mean:
+  - 0.9334
+  - 1.0347
+  home_goals:
+  - 1.3658
+  - 1.768
+  away_goals:
+  - 1.1263
+  - 1.4224
+  H%:
+  - 40.7237
+  - 46.3158
+  D%:
+  - 23.8829
+  - 27.5658
+  A%:
+  - 28.2895
+  - 32.4345
+  0-0%:
+  - 5.0654
+  - 7.5
+  corr_home_away:
+  - -0.1323
+  - -0.0058
+  2H_goal_share%:
+  - 53.6748
+  - 56.2808
+  shots_pt:
+  - 12.2197
+  - 13.0965
+  sot_pt:
+  - 4.0773
+  - 4.7829
+  sot_ratio%:
+  - 32.7347
+  - 36.5206
+  goals_per_shot%:
+  - 10.1968
+  - 12.1902
+  goals_per_sot%:
+  - 30.9626
+  - 33.3789
+  home_shots_share%:
+  - 54.2369
+  - 56.0838
+  fouls_pt:
+  - 10.9161
+  - 12.7056
+  corners_pt:
+  - 4.6454
+  - 5.1549
+  yellow_pt:
+  - 1.8371
+  - 2.3352
+  red_pm:
+  - 0.1158
+  - 0.2651
+  home_yellow_share%:
+  - 45.9433
+  - 47.725
+  HT_leader_win%:
+  - 71.7714
+  - 75.6962
+  HT_leader_draw%:
+  - 16.2025
+  - 19.5429
+  fav_win%:
+  - 53.4211
+  - 55.1316
+per_league:
+  EPL:
+    matches: 1520
+    goals_pm: 2.9539
+    goals_var_over_mean: 0.9456
+    home_goals: 1.6184
+    away_goals: 1.3355
+    H%: 44.4737
+    D%: 24.0789
+    A%: 31.4474
+    0-0%: 5.0658
+    corr_home_away: -0.1132
+    2H_goal_share%: 55.7016
+    shots_pt: 12.9704
+    sot_pt: 4.5181
+    sot_ratio%: 34.8339
+    goals_per_shot%: 11.3873
+    goals_per_sot%: 32.6902
+    home_shots_share%: 54.8821
+    fouls_pt: 10.9161
+    corners_pt: 5.1549
+    yellow_pt: 1.9447
+    red_pm: 0.1158
+    home_yellow_share%: 45.9743
+    HT_leader_win%: 72.3992
+    HT_leader_draw%: 17.4098
+    fav_win%: 54.6053
+    total_goals_dist%:
+      0: 5.07
+      1: 14.47
+      2: 23.22
+      3: 22.7
+      4: 17.57
+      5: 9.8
+      6: 4.21
+      7: 2.96
+    favourite_gradient:
+    - implied: 37.9
+      n: 228
+      win%: 44.7
+      draw%: 27.2
+    - implied: 45.1
+      n: 460
+      win%: 43.5
+      draw%: 26.3
+    - implied: 55.0
+      n: 376
+      win%: 54.0
+      draw%: 26.3
+    - implied: 64.9
+      n: 266
+      win%: 67.3
+      draw%: 19.9
+    - implied: 74.4
+      n: 137
+      win%: 70.8
+      draw%: 20.4
+    - implied: 83.5
+      n: 53
+      win%: 92.5
+      draw%: 5.7
+  LaLiga:
+    matches: 1520
+    goals_pm: 2.6178
+    goals_var_over_mean: 1.0021
+    home_goals: 1.4914
+    away_goals: 1.1263
+    H%: 46.3158
+    D%: 25.3947
+    A%: 28.2895
+    0-0%: 6.1184
+    corr_home_away: -0.0058
+    2H_goal_share%: 55.8934
+    shots_pt: 12.2197
+    sot_pt: 4.2273
+    sot_ratio%: 34.5941
+    goals_per_shot%: 10.7112
+    goals_per_sot%: 30.9626
+    home_shots_share%: 56.0838
+    fouls_pt: 12.7056
+    corners_pt: 4.7605
+    yellow_pt: 2.3352
+    red_pm: 0.2651
+    home_yellow_share%: 47.725
+    HT_leader_win%: 72.4942
+    HT_leader_draw%: 18.7646
+    fav_win%: 55.1316
+    total_goals_dist%:
+      0: 6.12
+      1: 20.66
+      2: 25.13
+      3: 23.29
+      4: 11.64
+      5: 7.24
+      6: 3.82
+      7: 2.11
+    favourite_gradient:
+    - implied: 37.6
+      n: 332
+      win%: 42.2
+      draw%: 30.4
+    - implied: 44.8
+      n: 503
+      win%: 48.3
+      draw%: 29.4
+    - implied: 54.9
+      n: 349
+      win%: 57.0
+      draw%: 24.9
+    - implied: 64.4
+      n: 183
+      win%: 67.8
+      draw%: 20.2
+    - implied: 74.4
+      n: 126
+      win%: 84.9
+      draw%: 10.3
+    - implied: 82.8
+      n: 27
+      win%: 92.6
+      draw%: 0.0
+  Bundesliga:
+    matches: 1224
+    goals_pm: 3.1904
+    goals_var_over_mean: 0.9797
+    home_goals: 1.768
+    away_goals: 1.4224
+    H%: 43.3824
+    D%: 25.1634
+    A%: 31.4542
+    0-0%: 5.0654
+    corr_home_away: -0.1323
+    2H_goal_share%: 53.6748
+    shots_pt: 13.0965
+    sot_pt: 4.7829
+    sot_ratio%: 36.5206
+    goals_per_shot%: 12.1902
+    goals_per_sot%: 33.3789
+    home_shots_share%: 55.4817
+    fouls_pt: 11.0421
+    corners_pt: 4.8741
+    yellow_pt: 1.993
+    red_pm: 0.1676
+    home_yellow_share%: 47.0564
+    HT_leader_win%: 74.904
+    HT_leader_draw%: 16.2612
+    fav_win%: 53.5131
+    total_goals_dist%:
+      0: 5.07
+      1: 11.36
+      2: 21.98
+      3: 20.42
+      4: 20.02
+      5: 10.13
+      6: 7.03
+      7: 4.0
+    favourite_gradient:
+    - implied: 38.1
+      n: 174
+      win%: 32.2
+      draw%: 30.5
+    - implied: 44.6
+      n: 462
+      win%: 47.2
+      draw%: 27.7
+    - implied: 54.9
+      n: 248
+      win%: 56.5
+      draw%: 25.8
+    - implied: 64.6
+      n: 193
+      win%: 64.8
+      draw%: 20.7
+    - implied: 74.6
+      n: 98
+      win%: 77.6
+      draw%: 18.4
+    - implied: 84.1
+      n: 49
+      win%: 81.6
+      draw%: 10.2
+  SerieA:
+    matches: 1520
+    goals_pm: 2.5401
+    goals_var_over_mean: 0.9334
+    home_goals: 1.3658
+    away_goals: 1.1743
+    H%: 40.7237
+    D%: 27.5658
+    A%: 31.7105
+    0-0%: 7.5
+    corr_home_away: -0.0908
+    2H_goal_share%: 56.2808
+    shots_pt: 12.4556
+    sot_pt: 4.0773
+    sot_ratio%: 32.7347
+    goals_per_shot%: 10.1968
+    goals_per_sot%: 31.1497
+    home_shots_share%: 54.7788
+    fouls_pt: 12.3737
+    corners_pt: 4.6454
+    yellow_pt: 2.0434
+    red_pm: 0.1829
+    home_yellow_share%: 45.9433
+    HT_leader_win%: 71.7714
+    HT_leader_draw%: 19.5429
+    fav_win%: 53.4211
+    total_goals_dist%:
+      0: 7.5
+      1: 19.08
+      2: 26.25
+      3: 22.5
+      4: 13.75
+      5: 7.04
+      6: 2.76
+      7: 1.12
+    favourite_gradient:
+    - implied: 37.5
+      n: 280
+      win%: 35.0
+      draw%: 36.1
+    - implied: 44.9
+      n: 486
+      win%: 47.1
+      draw%: 29.6
+    - implied: 54.9
+      n: 364
+      win%: 56.9
+      draw%: 26.6
+    - implied: 64.7
+      n: 264
+      win%: 68.9
+      draw%: 20.8
+    - implied: 73.8
+      n: 111
+      win%: 75.7
+      draw%: 17.1
+    - implied: 81.5
+      n: 15
+      win%: 80.0
+      draw%: 20.0
+  Ligue1:
+    matches: 1298
+    goals_pm: 2.8251
+    goals_var_over_mean: 1.0347
+    home_goals: 1.5293
+    away_goals: 1.2958
+    H%: 43.6826
+    D%: 23.8829
+    A%: 32.4345
+    0-0%: 7.0108
+    corr_home_away: -0.0612
+    2H_goal_share%: 55.2768
+    shots_pt: 12.4376
+    sot_pt: 4.5208
+    sot_ratio%: 36.3479
+    goals_per_shot%: 11.3572
+    goals_per_sot%: 31.2457
+    home_shots_share%: 54.2369
+    fouls_pt: 12.2411
+    corners_pt: 4.6949
+    yellow_pt: 1.8371
+    red_pm: 0.2404
+    home_yellow_share%: 46.2571
+    HT_leader_win%: 75.6962
+    HT_leader_draw%: 16.2025
+    fav_win%: 53.5439
+    total_goals_dist%:
+      0: 7.01
+      1: 15.79
+      2: 22.73
+      3: 23.11
+      4: 16.33
+      5: 8.01
+      6: 3.93
+      7: 3.08
+    favourite_gradient:
+    - implied: 38.0
+      n: 220
+      win%: 44.1
+      draw%: 26.4
+    - implied: 45.1
+      n: 427
+      win%: 43.3
+      draw%: 25.5
+    - implied: 54.7
+      n: 325
+      win%: 56.6
+      draw%: 25.8
+    - implied: 65.0
+      n: 217
+      win%: 66.8
+      draw%: 19.8
+    - implied: 74.3
+      n: 88
+      win%: 75.0
+      draw%: 15.9
+    - implied: 83.8
+      n: 21
+      win%: 85.7
+      draw%: 9.5
+  Championship:
+    matches: 2208
+    goals_pm: 2.5421
+    goals_var_over_mean: 0.9379
+    home_goals: 1.4103
+    away_goals: 1.1318
+    H%: 43.2971
+    D%: 26.2681
+    A%: 30.4348
+    0-0%: 7.2917
+    corr_home_away: -0.0551
+    2H_goal_share%: 54.4094
+    shots_pt: 12.1456
+    sot_pt: 3.9837
+    sot_ratio%: 32.7995
+    goals_per_shot%: 10.4652
+    goals_per_sot%: 31.9065
+    home_shots_share%: 55.7546
+    fouls_pt: 10.9298
+    corners_pt: 5.1499
+    yellow_pt: 1.8945
+    red_pm: 0.1087
+    home_yellow_share%: 45.41
+    HT_leader_win%: 73.2339
+    HT_leader_draw%: 17.3469
+    fav_win%: 46.875
+    total_goals_dist%:
+      0: 7.29
+      1: 19.66
+      2: 25.23
+      3: 23.41
+      4: 14.13
+      5: 6.25
+      6: 2.67
+      7: 1.36
+    favourite_gradient:
+    - implied: 37.8
+      n: 528
+      win%: 33.7
+      draw%: 29.4
+    - implied: 44.7
+      n: 946
+      win%: 46.5
+      draw%: 25.2
+    - implied: 54.5
+      n: 489
+      win%: 52.1
+      draw%: 26.6
+    - implied: 63.8
+      n: 185
+      win%: 58.9
+      draw%: 28.1
+    - implied: 73.5
+      n: 54
+      win%: 88.9
+      draw%: 7.4
+    - implied: 82.3
+      n: 6
+      win%: 83.3
+      draw%: 16.7
