@@ -7,23 +7,30 @@ clock:
 
 motion:
   vmax_scale: 0.88              # 最高速 = v1 的 vmax × 此值（追蹤資料：第 99.9 百分位 7.9 m/s；v1 的平均球員 9.0 m/s 偏快）
-  a_max: 5.5                    # 加速度上限 m/s²（追蹤資料 |a| 第 99.9 百分位約 5.3）
-  a_dec: 6.5                    # 減速度上限
-  arrive_tau: 2.5               # 接近目標時的期望速度 = 距離 / arrive_tau
+  ramp: [2.0, 12.0]            # 回防、前插、逼搶的速度比例隨離目標的距離（2 m 內慢跑，14 m 以上用滿意圖的比例）
+  sprint_dist: [12.0, 26.0]    # 衝向目標的意圖：離目標超過 12 m 起逐漸加速到全速，38 m 以上全速
+  accel_decay: 0.0              # 加速度隨速度遞減：a = a_max × (1 − accel_decay × v / 最高速)；0 = 固定上限（與追蹤資料的 p99 包絡最吻合）
+  decision_tau_scale: 2.8       # 決策函式（v1）用 sprint_time(d, vmax, tau) 估計誰先到；v1 的 tau 對應起步加速 12 m/s²，v2 實際 2.7 m/s²，換算約 3 倍
+  a_max: 2.7                    # 加速度上限 m/s²（追蹤資料 0.5 秒平滑後的 p99 約 2.1–2.9）
+  a_dec: 3.0                    # 減速度上限（追蹤資料 p1 約 −2.1～−3.5）
+  arrive_tau: 3.0               # 接近目標時的期望速度 = 距離 / arrive_tau
   frac:                         # 各意圖的速度占最高速的比例
-    hold: 0.26
-    run: 0.80
-    press: 0.95
-    recover: 0.95
-    receive: 0.90
-    chase: 1.00
-    carry: 0.80
+    hold: 0.17
+    run: 0.60
+    press: 0.64
+    recover: 0.66
+    receive: 0.62
+    chase: 0.75
+    carry: 0.58
   energy_ref_frac: 0.30         # 平均速度比例；以 v1 的每分鐘耗能為基準，依 (速度比例 / 此值)² 調整
   refresh_every: 30.0           # 每隔幾秒依能量重算有效屬性
 
 shape:
   period: 1.0                   # 目標點的更新週期（s）；球權或階段改變、重啟時立即更新
   smooth: 0.3                   # 目標點的指數平滑係數（每次更新往新目標移動的比例）
+  defend_zone: 12.0             # 球附近這個範圍內的防守者用逼搶速度調整位置（盯人要跟得上進攻者）
+  noise_hold: 6.0               # 位置誤差與跑位候選的亂數在這個時間窗（s）內保持不變
+  near_ball: 12.0               # 目標點離球 12 m 內的人（逼搶、貼身盯人、接應）不平滑，跟著球走
   press_hold: 3.0               # 計算逼搶者位置時用的持球時間（s）；位置由運動學決定，不再受持球時間限制
   intent_period: 0.5            # 無球意圖的評估週期（s）
 
@@ -44,8 +51,11 @@ contest:
   intercept_k: 0.45             # 攔截成功率的 logit：k·(攔截能力 − R)/10 − 0.10·(球速 − 12) + b0
   intercept_b0: -0.7            # 球路經過防守者身邊也不一定碰得到（模型假設，待校準）
   lofted_clear_z: 2.4           # 高球低於此高度才可能被攔截（m）
-  control_b0: 2.0               # 接球控制的 logit：b0 + k·(停球 − R)/10 − 0.12·(到達球速 − 8) − 0.6·受壓
+  control_b0: 2.3               # 接球控制的 logit：b0 + k·(停球 − R)/10 − speed·(到達球速 − ref) − press·受壓
   control_k: 0.40
+  control_speed: 0.06
+  control_speed_ref: 12.0
+  control_press: 0.5
   tackle_range: 1.4             # 可搶斷的距離（m）
   tackle_rate: 0.15             # 每秒嘗試搶斷的次數（範圍內）；真實防守者多半是盯住等待，不是持續出腳
   tackle_b0: -0.9               # 搶斷成功率的 logit：b0 + k·(搶斷 − 持球者護球)/10

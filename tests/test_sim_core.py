@@ -41,7 +41,7 @@ def test_speed_and_acceleration_never_exceed_limits(world):
     s = 5
     w.tgt[s] = (100.0, w.pos[s, 1])
     w.intent[s] = int(Intent.RECOVER)
-    cap = w.sim.vmax[s] * w.sp.motion.vmax_scale * w.sp.motion.frac.recover
+    cap = w.sim.vmax[s] * w.sp.motion.vmax_scale                  # 目標很遠（> 28 m）：衝刺到全速
     dt = w.sp.clock.dt
     prev = w.vel[s].copy()
     vmax_seen, amax_seen = 0.0, 0.0
@@ -279,6 +279,8 @@ def test_on_ball_decision_is_the_v1_decision_given_the_same_state_and_random_str
     for s in range(11, 22):                                          # 客隊放在主隊前方，產生選項
         w.pos[s] = (75.0 + 2.0 * (s - 11) % 10, 8.0 + 5.0 * (s - 11))
     sim = w.sim
+    w.sp.motion.vmax_scale = 1.0                         # 決策函式的運動能力換算在這裡關掉，才能與 v1 直接比
+    w.sp.motion.decision_tau_scale = 1.0
     st_act = sim.rng_act.bit_generator.state
     st_dec = sim.rng_dec.bit_generator.state
     opt2, hold2 = play.decide(w, c)

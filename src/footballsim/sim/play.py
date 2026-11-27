@@ -72,10 +72,15 @@ def decide(w: World, c: int, mode=None):
         hold *= w.sp.phase.at_hold_factor
     sim.poss, sim.carrier, sim.ball = T, c, (float(w.ball[0]), float(w.ball[1]))
     sim._hold = hold
+    # v1 的決策用 vmax 與 tau 估計「誰先到」（跑動路線傳球、直塞、帶球封堵）。換成 v2 實際的運動能力
+    # （最高速 × vmax_scale、起步加速較慢），決策才不會選接球者實際到不了的傳球。
+    vm, ta = sim.vmax, sim.tau
+    sim.vmax, sim.tau = vm * w.sp.motion.vmax_scale, ta * w.sp.motion.decision_tau_scale
     try:
         opt = v1dec.choose(sim, T, c, pos_T, off, mode)
     finally:
         sim._hold = None
+        sim.vmax, sim.tau = vm, ta
     return opt, hold
 
 
@@ -95,7 +100,8 @@ def carrier_step(w: World) -> None:
             st = {"kind": opt.kind, "opt": opt, "end": end, "t_end": w.clock + max(hold, 1.0) * 1.6 + 1.0,
                   "k": opt.target if opt.kind == "take_on" else None}
         else:
-            st = {"kind": "wait", "opt": opt, "until": w.clock + hold + sp.rules.hold_reaction}
+            st = {"kind": "wait", "opt": opt, "until": w.clock + hold + sp.rules.hold_reaction,
+                  "rpos0": w.pos[opt.target].copy() if opt.target is not None else None}
         w.carry = st
     kind = st["kind"]
     if kind in ("carry", "take_on"):
@@ -114,7 +120,7 @@ def carrier_step(w: World) -> None:
     elif kind == "windup":
         w.override[c] = (Intent.HOLD, w.pos[c] + 0.3 * w.vel[c])
         if w.clock >= st["until"]:
-            execute(w, c, st["opt"])
+            execute(w, c, st["opt"], st.get("rpos0"))
 
 
 def _duel(w: World, c: int, k: int, opt) -> None:
@@ -156,19 +162,22 @@ def tackle_step(w: World, dt: float) -> None:
 
 
 # ------------------------------------------------------------------ 動作
-def execute(w: World, c: int, opt) -> None:
+def execute(w: World, c: int, opt, rpos0=None) -> None:
     w.carry = None
     if opt.kind == "shot":
         shoot(w, c, opt)
     else:
-        kick(w, c, opt)
+        kick(w, c, opt, rpos0)
 
 
-def kick(w: World, c: int, opt) -> None:
+def kick(w: World, c: int, opt, rpos0=None) -> None:
     sim, sp = w.sim, w.sp
     T = int(w.team_of[c])
     start = w.pos[c].copy()
     aim = w.tf(T, np.array([opt.x, opt.y]))
+    if rpos0 is not None and opt.target is not None and opt.kind != "clear":
+        # 決策到起腳隔了持球時間，接球者已經移動：目標點跟著接球者的位移（保留決策時的相對位置，例如往前傳到他前方）
+        aim = aim + (w.pos[opt.target] - rpos0)
     d = float(np.hypot(*(aim - start)))
     kind = opt.kind
     if kind == "cross" or kind == "clear":
@@ -317,7 +326,8 @@ def arrival(w: World) -> None:
             same = int(w.team_of[s]) == f.team
             ft = sim.eff[s, ATTR.FIRST_TOUCH] if same else sim.comp[s, sim.C.INTERCEPTION]
             P = pressure_on(w, s, 1.5)
-            z = cp.control_b0 + cp.control_k * (ft - sim.R) / 10.0 - 0.12 * (speed - 8.0) - 0.6 * P
+            z = (cp.control_b0 + cp.control_k * (ft - sim.R) / 10.0 - cp.control_speed * (speed - cp.control_speed_ref)
+                 - cp.control_press * P)
             if sim.rng_act.random() < sigmoid(z):
                 give_ball(w, s, "recovery" if not same else "pass")
                 return

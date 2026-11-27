@@ -49,8 +49,11 @@ def test_invariants_hold_at_every_tick(league):
     cap = w.sim.vmax * w.sp.motion.vmax_scale * 1.05 + 0.5        # 最高速（含轉換時的小誤差）
     last_clock, last_pos = w.clock, w.pos.copy()
     modes = set()
+    period = w.period
     for _ in range(3000):
         m.step()
+        if w.mode != Mode.DEAD and w.period != period:          # 半場結束後全隊回到開球陣型（不是移動）
+            period, last_pos = w.period, w.pos.copy()
         act = w.sim.active
         assert (w.pos[act, 0] >= 0).all() and (w.pos[act, 0] <= 105).all()
         assert (w.pos[act, 1] >= 0).all() and (w.pos[act, 1] <= 68).all()
@@ -106,3 +109,28 @@ def test_speed_record(league):
     full = dt * 5580.0 / 600.0
     print(f"10 個模擬分鐘 {dt:.1f} s，全場外推約 {full:.0f} s")
     assert full < 120.0
+
+
+def test_motion_stays_within_the_ranges_of_real_tracking_data(league):
+    """校準回歸：模擬球員的速度與加速度分布落在真實追蹤（Metrica 25 Hz、SkillCorner 10 Hz，0.5 秒平滑）的範圍內"""
+    from footballsim.calibration.tracking import motion_stats
+    from footballsim.sim import rules
+
+    sp = short_params(300.0)
+    m = TickMatch(league.teams[0], league.teams[1], sim_params=sp, seed=7)
+    w = m.w
+    rules.start_restart(w, "kickoff", m.first_kickoff, 52.5, 34.0, 0.0)
+    rules.kickoff_teleport(w)
+    n = int(300.0 / 0.1)
+    P = np.zeros((n, 22, 2))
+    for i in range(n):
+        m.step()
+        P[i] = w.pos
+    st = motion_stats([P[:, s, :].copy() for s in range(22) if s % 11 != 0], 10.0)
+    assert 1.5 <= st["mean_speed"] <= 2.5                  # 真實 1.8–2.1 m/s
+    assert 5.3 <= st["speed_pct"][2] <= 7.0                # p99：真實 6.2
+    assert 6.5 <= st["speed_pct"][3] <= 8.8                # p99.9：真實 7.7–7.95（模擬的衝刺較少，約 7.1）
+    assert 8.0 <= st["km_per_90"] <= 13.5                  # 真實 9.8–11.3 km
+    for key in ("0-2", "2-4", "4-6"):
+        lo, med, hi, n_ = st["acc_env"][key]
+        assert 1.8 <= hi <= 3.4 and -3.9 <= lo <= -1.8     # 真實 p99 +2.1～+2.9、p1 −2.1～−3.5

@@ -77,7 +77,8 @@ def cmd_calibrate(a) -> None:
 
     lg = _league(a.league)
     t = time.time()
-    S = run_batch(lg, a.matches, workers=a.workers, seed=a.seed, overrides=_overrides(a.set) or None)
+    S = run_batch(lg, a.matches, workers=a.workers, seed=a.seed, overrides=_overrides(a.set) or None,
+                  engine=a.engine)
     print(f"{a.matches} 場，耗時 {time.time() - t:.0f} 秒（{a.workers} 個行程）")
     print(format_comparison(compare(aggregate(S))))
 
@@ -195,7 +196,8 @@ def main(argv=None) -> None:
     p.add_argument("--matches", type=int, default=300)
     p.add_argument("--workers", type=int, default=1, help="行程數（預設 1、上限 2；低負荷）")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--set", nargs="*", metavar="KEY=VALUE")
+    p.add_argument("--set", nargs="*", metavar="KEY=VALUE", help="覆寫參數；v2 的 sim_params 以 sim. 開頭，例如 sim.motion.a_max=3")
+    p.add_argument("--engine", choices=["event", "tick"], default="event", help="event = v1 事件驅動；tick = v2 逐幀")
     p.set_defaults(func=cmd_calibrate)
 
     p = sub.add_parser("sensitivity", help="屬性敏感度分析（配對模擬）")

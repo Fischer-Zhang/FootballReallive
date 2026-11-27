@@ -41,16 +41,29 @@ def limit_resources() -> None:
         pass
 
 
-def _init(league_json: str, overrides: Optional[dict]) -> None:
+def _init(league_json: str, overrides: Optional[dict], engine: str = "event") -> None:
     limit_resources()
     _W["league"] = League.model_validate_json(league_json)
-    _W["params"] = load_params(overrides=overrides)
+    ov = dict(overrides or {})
+    sim_ov = {k[4:]: ov.pop(k) for k in list(ov) if k.startswith("sim.")}     # "sim." 開頭的覆寫給 v2 的 sim_params
+    _W["params"] = load_params(overrides=ov or None)
+    _W["engine"] = engine
+    if engine == "tick":
+        from ..sim.params import load_sim_params
+
+        _W["sim_params"] = load_sim_params(overrides=sim_ov or None)
 
 
 def _one(task) -> dict:
     h, a, seed = task
     lg = _W["league"]
-    res = simulate_match(lg.teams[h], lg.teams[a], params=_W["params"], seed=seed)
+    if _W.get("engine") == "tick":
+        from ..sim import simulate_tick_match
+
+        res = simulate_tick_match(lg.teams[h], lg.teams[a], params=_W["params"], sim_params=_W["sim_params"],
+                                  seed=seed)
+    else:
+        res = simulate_match(lg.teams[h], lg.teams[a], params=_W["params"], seed=seed)
     return summarize(res, lg.teams[h].level, lg.teams[a].level)
 
 
@@ -87,14 +100,14 @@ def season_tasks(n_teams: int, n_matches: int, seed: int = 0) -> List[tuple]:
 
 
 def run_batch(league: League, n_matches: int, workers: Optional[int] = None, seed: int = 0,
-              overrides: Optional[dict] = None, tasks: Optional[Iterable] = None) -> List[dict]:
+              overrides: Optional[dict] = None, tasks: Optional[Iterable] = None, engine: str = "event") -> List[dict]:
     tasks = list(tasks) if tasks is not None else season_tasks(len(league.teams), n_matches, seed)
     workers = min(workers or DEFAULT_WORKERS, MAX_WORKERS)
     js = league.model_dump_json()
     if workers == 1:
-        _init(js, overrides)
+        _init(js, overrides, engine)
         return [_one(t) for t in tasks]
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=(js, overrides)) as ex:
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=(js, overrides, engine)) as ex:
         return list(ex.map(_one, tasks, chunksize=8))
 
 

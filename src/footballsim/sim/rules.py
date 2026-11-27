@@ -44,6 +44,8 @@ def start_restart(w: World, kind: str, team: int, x: float, y: float, delay: flo
     taker = _taker(w, kind, team, np.array([x, y]))        # 發球者走向發球點（不瞬移）
     w.restart["taker"] = taker
     w.override[taker] = (Intent.CHASE, np.array([x, y]))
+    gap = float(np.hypot(*(w.pos[taker] - np.array([x, y]))))
+    w.restart["t"] = max(w.restart["t"], w.clock + gap / 4.5 + 1.0)   # 至少給發球者以約 4.5 m/s 跑到的時間
 
 
 def check_out(w: World) -> None:
@@ -94,7 +96,7 @@ def perform_restart(w: World) -> None:
                 w.vel[s] = 0.0
     taker = r["taker"]
     gap = float(np.hypot(*(w.pos[taker] - spot)))
-    if gap > 2.0 and w.clock < r["t"] + 15.0:              # 發球者還沒走到：再等（最多 15 s）
+    if gap > 2.0 and w.clock < r["t"] + 20.0:              # 發球者還沒走到：再等（最多 20 s）
         return
     from .play import give_ball
     w.pos[taker] = spot                                    # 最後 2 m 以內直接就位

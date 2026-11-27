@@ -88,11 +88,23 @@ def advance_ball(w: World, dt: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 # ------------------------------------------------------------------ 球員
-def speed_cap(w: World) -> np.ndarray:
-    """各球員這個 tick 的最高速（m/s）= 屬性決定的最高速 × 意圖比例"""
-    fr = w.sp.motion.frac
+def speed_cap(w: World, dist: np.ndarray | None = None) -> np.ndarray:
+    """各球員這個 tick 的最高速（m/s）= 屬性決定的最高速 × 速度比例。
+    比例隨「離目標多遠」連續變化：離目標近就慢跑（hold），越遠越接近意圖的比例（回防、前插、逼搶…），
+    很遠（意圖比例之後再加距離）才衝刺到全速；接球與持球推進用固定比例。追蹤資料：> 5.5 m/s 只占約 2% 的時間。"""
+    m = w.sp.motion
+    fr = m.frac
     table = np.array([fr.hold, fr.run, fr.press, fr.recover, fr.receive, fr.chase, fr.carry])
-    return w.sim.vmax * w.sp.motion.vmax_scale * table[w.intent]
+    f = table[w.intent]
+    if dist is not None:
+        r0, r1 = m.ramp
+        ramp = np.clip((dist - r0) / r1, 0.0, 1.0)
+        scaled = (w.intent == int(Intent.RUN)) | (w.intent == int(Intent.PRESS)) | (w.intent == int(Intent.RECOVER))
+        f = np.where(scaled, fr.hold + (f - fr.hold) * ramp, f)
+        lo, span = m.sprint_dist
+        urgent = (w.intent != int(Intent.HOLD)) & (w.intent != int(Intent.CARRY))
+        f = np.where(urgent, f + (1.0 - f) * np.clip((dist - lo) / span, 0.0, 1.0), f)
+    return w.sim.vmax * m.vmax_scale * f
 
 
 def integrate(w: World, dt: float) -> None:
@@ -102,7 +114,7 @@ def integrate(w: World, dt: float) -> None:
     act = sim.active
     d = w.tgt - w.pos
     dist = np.hypot(d[:, 0], d[:, 1])
-    cap = speed_cap(w)
+    cap = speed_cap(w, dist)
     # 保持陣型（HOLD）時小幅調整位置很從容（速度 = 距離 / arrive_tau）；其他意圖衝向目標，以煞車距離決定何時減速
     brake = np.sqrt(2.0 * 0.8 * m.a_dec * dist)
     v_des_mag = np.where(w.intent == int(Intent.HOLD), np.minimum(cap, dist / m.arrive_tau), np.minimum(cap, brake))
@@ -114,7 +126,10 @@ def integrate(w: World, dt: float) -> None:
     # 加速能力：v1 的 tau（加速屬性決定的時間常數）越小，起步越快；a_max 是平均球員（R）的值
     tau_ref = sim.p.sprint.tau_a + sim.p.sprint.tau_b * sim.R
     quick = tau_ref / np.maximum(sim.tau, 0.2)
-    a = np.where(along < 0, m.a_dec, m.a_max) * quick
+    # 起步最猛、越接近最高速加速越小：a = a_max × (1 − accel_decay × v / 最高速)；減速不受速度影響
+    speed_now = np.hypot(w.vel[:, 0], w.vel[:, 1])
+    head = np.clip(1.0 - m.accel_decay * speed_now / np.maximum(sim.vmax * m.vmax_scale, 1e-9), 0.2, 1.0)
+    a = np.where(along < 0, m.a_dec, m.a_max * head) * quick
     scale = np.minimum(1.0, a * dt / np.maximum(n, 1e-9))
     w.vel += dv * scale[:, None]
     w.vel[~act] = 0.0

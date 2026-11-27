@@ -17,11 +17,19 @@ def update_targets(w: World) -> None:
     sim = w.sim
     T = w.poss
     owner = w.owner if (w.mode == Mode.CARRIED and w.owner is not None and w.team_of[w.owner] == T) else None
-    b = w.tf(T, w.ball[:2])
+    ball = w.ball[:2]
+    f = w.flight
+    if w.mode == Mode.FLIGHT and f is not None and f.kind in ("pass", "through", "cross") and f.receiver is not None:
+        # 球在飛行中：防守者預判接球者與落點，提前往那裡逼近（陣型以「接球者在落點持球」計算）
+        owner, ball, T = int(f.receiver), f.end, f.team
+    b = w.tf(T, ball)
     sim.gpos = None                       # 關掉 v1 的位置連續性：移動由 physics.integrate 負責
-    sim.poss, sim.carrier, sim.ball = T, owner, (float(w.ball[0]), float(w.ball[1]))
+    sim.poss, sim.carrier, sim.ball = T, owner, (float(ball[0]), float(ball[1]))
     sim.elapsed = w.clock
     sim._hold = w.sp.shape.press_hold
+    # v1 的陣型每次呼叫都重抽位置誤差與跑位候選；真實球員的位置誤差是慢慢變化的。同一個時間窗內用同一組亂數，
+    # 誤差就在窗內保持不變（窗與窗之間才換），目標點不會每秒抖動。
+    sim.rng_shape = np.random.default_rng([w.seed, int(w.clock // w.sp.shape.noise_hold)])
     try:
         pos_T, off = v1shape.compute(sim, T, float(b[0]), float(b[1]), owner)
     finally:
@@ -30,12 +38,23 @@ def update_targets(w: World) -> None:
     act = sim.active
     # v1 的陣型每次重算都會重抽位置誤差與跑位；球員不會每秒重新抽籤，所以目標點做指數平滑。
     # 球權、階段改變與重啟時立即跳到新的目標（轉換要快）。
-    a = 1.0 if (w.fast_shape or w.tgt_s is None) else w.sp.shape.smooth
+    # 球附近的人（逼搶、貼身盯人、接應）的目標點跟著球走，不平滑；離球遠的人才平滑
+    if w.fast_shape or w.tgt_s is None:
+        a = np.ones(22)
+    else:
+        near = np.hypot(tg[:, 0] - w.ball[0], tg[:, 1] - w.ball[1]) < w.sp.shape.near_ball
+        a = np.where(near, 1.0, w.sp.shape.smooth)
     if w.tgt_s is None:
         w.tgt_s = tg.copy()
-    w.tgt_s[act] += a * (tg[act] - w.tgt_s[act])
+    w.tgt_s[act] += a[act, None] * (tg[act] - w.tgt_s[act])
     w.fast_shape = False
     w.tgt[act] = w.tgt_s[act]
+    if w.mode == Mode.DEAD and w.restart is not None and w.restart["kind"] == "kickoff":
+        for t in (0, 1):                                    # 開球前雙方都待在本方半場
+            idx = np.array([s for s in w.active(t)], int)
+            p = w.tf(t, w.tgt[idx])
+            p[:, 0] = np.minimum(p[:, 0], 51.5)
+            w.tgt[idx] = w.tf(t, p)
     w.off_line = float(off)
     sim.gpos = None
 
@@ -54,8 +73,13 @@ def assign_intents(w: World) -> None:
         if ph in (Phase.DT, Phase.OOP):
             intent[idx[far]] = Intent.RECOVER
             if ph == Phase.OOP:
-                near = np.hypot(w.tgt[idx, 0] - w.ball[0], w.tgt[idx, 1] - w.ball[1]) < 5.0   # 陣型要他貼近持球者
+                dball = np.hypot(w.tgt[idx, 0] - w.ball[0], w.tgt[idx, 1] - w.ball[1])
+                near = dball < 5.0                                   # 陣型要他貼近持球者
                 intent[idx[near]] = Intent.PRESS
+                # 持球者附近的盯人與補位要跟得上進攻者的跑動，不能只用保持陣型的慢速
+                zone = (dball < w.sp.shape.defend_zone) & (d_tgt[idx] > 1.0) & ~far
+                intent[idx[zone]] = Intent.PRESS
+
         else:
             ahead = (w.tf(T, w.tgt[idx])[:, 0] - w.tf(T, w.pos[idx])[:, 0]) > 8.0
             intent[idx[ahead]] = Intent.RUN
