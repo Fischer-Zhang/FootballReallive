@@ -47,6 +47,8 @@ def give_ball(w: World, slot: int, how: str) -> None:
         w.add_event(slot, E.INTERCEPTION, E.SUCCESS, w.pos[slot].copy())
     elif how == "recovery":
         w.add_event(slot, E.RECOVERY, E.SUCCESS, w.pos[slot].copy())
+    vb = w.bvel[:2].copy()                                # 球到達時的運動方向：持球者順勢帶球的方向
+    w.touch_dir = vb / np.hypot(*vb) if float(np.hypot(*vb)) > 1.0 else np.zeros(2)
     phase.possession_change(w, T, slot, how)
     w.mode, w.owner, w.flight = Mode.CARRIED, slot, None
     w.ball[:2], w.ball[2] = w.pos[slot], 0.0
@@ -85,6 +87,10 @@ def decide(w: World, c: int, mode=None):
 
 
 def carrier_step(w: World) -> None:
+    """持球者：接球後先持球一段時間（持球時間，期間帶著球慢慢走），時間到才用「當下」的狀態決策。
+    v1 的行為模型（射門、帶球、傳球傾向）擬合的是真實動作發生那一刻的狀態（最近對手距離、空間），不是接球那一刻；
+    接球後 1–2 秒防守者已經逼近，所以在接球當下決策會高估空間與射門機會。
+    決策為傳球／射門：動作時間（windup）後起腳；決策為帶球：跑到終點後立刻再決策（不再等待）。"""
     c = w.owner
     if c is None or w.mode != Mode.CARRIED:
         return
@@ -93,17 +99,26 @@ def carrier_step(w: World) -> None:
     if st is None:
         mode = getattr(w, "restart_mode", None)
         w.restart_mode = None
-        w.kick_mode = mode                            # 重啟後的第一次出球要記成界外球、球門球、角球等事件
-        opt, hold = decide(w, c, mode)
-        if opt.kind in ("carry", "take_on"):
-            end = w.tf(T, np.array([opt.x, opt.y]))
-            st = {"kind": opt.kind, "opt": opt, "end": end, "t_end": w.clock + max(hold, 1.0) * 1.6 + 1.0,
-                  "k": opt.target if opt.kind == "take_on" else None}
-        else:
-            st = {"kind": "wait", "opt": opt, "until": w.clock + hold + sp.rules.hold_reaction,
-                  "rpos0": w.pos[opt.target].copy() if opt.target is not None else None}
+        hold = w.sim.draw_hold()
+        if w.phase[T].name == "AT":
+            hold *= sp.phase.at_hold_factor
+        st = {"kind": "wait", "mode": mode, "until": w.clock + hold + sp.rules.hold_reaction}
         w.carry = st
     kind = st["kind"]
+    if kind == "wait":
+        w.override[c] = (Intent.WAIT, _drift_target(w, c, T))
+        if w.clock >= st["until"]:
+            mode = st.get("mode")
+            w.kick_mode = mode                         # 重啟後的第一次出球要記成界外球、球門球、角球等事件
+            opt, hold = decide(w, c, mode)
+            if opt.kind in ("carry", "take_on"):
+                end = w.tf(T, np.array([opt.x, opt.y]))
+                w.carry = st = {"kind": opt.kind, "opt": opt, "end": end, "t_end": w.clock + max(hold, 1.0) * 1.6 + 1.0,
+                                "k": opt.target if opt.kind == "take_on" else None}
+            else:
+                w.carry = st = {"kind": "windup", "opt": opt, "until": w.clock + sp.rules.windup,
+                                "rpos0": w.pos[opt.target].copy() if opt.target is not None else None}
+            kind = st["kind"]
     if kind in ("carry", "take_on"):
         w.override[c] = (Intent.CARRY, st["end"])
         if kind == "take_on":
@@ -112,15 +127,24 @@ def carrier_step(w: World) -> None:
                 _duel(w, c, k, st["opt"])
                 return
         if np.hypot(*(w.pos[c] - st["end"])) < 0.9 or w.clock > st["t_end"]:
-            w.carry = None
-    elif kind == "wait":
-        w.override[c] = (Intent.HOLD, w.pos[c] + 0.5 * w.vel[c])
-        if w.clock >= st["until"]:
-            st["kind"], st["until"] = "windup", w.clock + sp.rules.windup
+            w.carry = {"kind": "wait", "mode": None, "until": w.clock}       # 帶完一段：馬上再決策
     elif kind == "windup":
-        w.override[c] = (Intent.HOLD, w.pos[c] + 0.3 * w.vel[c])
+        w.override[c] = (Intent.WAIT, _drift_target(w, c, T))
         if w.clock >= st["until"]:
             execute(w, c, st["opt"], st.get("rpos0"))
+
+
+def _drift_target(w: World, c: int, T: int) -> np.ndarray:
+    """持球等待出手時，持球者帶著球順勢走（追蹤資料：接球後持球者的速度中位數 1.9 → 3.3 m/s，不會站著不動；
+    但「向前動量」只有 2%，所以不是往球門衝）：方向是球到達的方向與目前移動方向的混合，球不是傳來的（重啟）就原地。"""
+    td = getattr(w, "touch_dir", np.zeros(2))
+    v = w.vel[c]
+    sp = float(np.hypot(*v))
+    d = td if sp < 0.5 else 0.5 * td + 0.5 * v / sp
+    n = float(np.hypot(*d))
+    if n < 1e-6:
+        return w.pos[c].copy()
+    return w.pos[c] + d / n * w.sp.rules.wait_drift
 
 
 def _duel(w: World, c: int, k: int, opt) -> None:

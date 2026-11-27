@@ -139,7 +139,7 @@ def skillcorner_trajs(match_id: int, detected_only: bool = False) -> list[np.nda
     detected_only：只用被攝影機看到的位置（外推的位置視為缺值）"""
     d = RAW / "skillcorner" / str(match_id)
     meta = json.loads((d / f"{match_id}_match.json").read_text(encoding="utf-8"))
-    gk = {p["trackable_object"] for p in meta["players"] if p["player_role"]["acronym"] == "GK"}   # 追蹤的 player_id 是 trackable_object
+    gk = {p["id"] for p in meta["players"] if p["player_role"]["acronym"] == "GK"}   # 追蹤的 player_id 是 match.json 的 id
     frames, pid_pos = [], {}
     with open(d / f"{match_id}_tracking_extrapolated.jsonl", encoding="utf-8") as fh:
         for line in fh:
@@ -164,4 +164,121 @@ def skillcorner_trajs(match_id: int, detected_only: bool = False) -> list[np.nda
             full[~det] = np.nan
         if np.isfinite(full).all(1).sum() > 6000 and not _is_gk(full):
             out.append(full)
+    return out
+
+
+# ------------------------------------------------------------------ 接球後的壓力（SkillCorner 事件＋追蹤）
+RECEPTION_OFFSETS = (0.0, 0.5, 1.0, 1.5, 2.0)      # 接球後經過的秒數
+ZONES = ((0.0, 35.0), (35.0, 70.0), (70.0, 105.0))
+
+
+def reception_pressure(match_id: int) -> list[tuple]:
+    """每次傳球接球（player_possession，start_type = pass_reception）：接球瞬間與之後 0.5、1、1.5、2 秒，
+    持球者離最近對手（含門將）的距離，只在仍持球、且持球者與最近的對手都被偵測到時計。
+    回傳 (進攻座標下的 x [0–105]、偏移序號、最近對手距離)。x 軸以持球隊進攻方向為正。"""
+    import csv
+
+    d = RAW / "skillcorner" / str(match_id)
+    meta = json.loads((d / f"{match_id}_match.json").read_text(encoding="utf-8"))
+    tr_of = {p["id"]: p["id"] for p in meta["players"]}           # 事件與追蹤都用 match.json 的球員 id
+    team_of_tr = {p["id"]: p["team_id"] for p in meta["players"]}
+    fr0, frames = None, {}
+    with open(d / f"{match_id}_tracking_extrapolated.jsonl", encoding="utf-8") as fh:
+        for line in fh:
+            o = json.loads(line)
+            if o.get("period") is None or not o.get("player_data"):
+                continue
+            frames[o["frame"]] = [(p["player_id"], p["x"], p["y"], bool(p.get("is_detected"))) for p in o["player_data"]]
+    out = []
+    with open(d / f"{match_id}_dynamic_events.csv", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r["event_type"] != "player_possession" or r["start_type"] != "pass_reception":
+                continue
+            tr = tr_of.get(int(r["player_id"])) if r["player_id"] else None
+            if tr is None:
+                continue
+            f0, f1 = int(r["frame_start"]), int(r["frame_end"])
+            team = team_of_tr.get(tr)
+            side = 1.0 if r["attacking_side"] == "left_to_right" else -1.0
+            x_att = float(r["x_start"]) * side + LENGTH / 2
+            for k, off in enumerate(RECEPTION_OFFSETS):
+                f = f0 + int(round(off * 10))
+                if f > f1 or f not in frames:
+                    break
+                rows = frames[f]
+                me = next((q for q in rows if q[0] == tr), None)
+                if me is None or not me[3]:
+                    break
+                opp = [q for q in rows if team_of_tr.get(q[0]) not in (None, team) and q[3]]
+                if not opp:
+                    continue
+                dq = [(((q[1] - me[1]) ** 2 + (q[2] - me[2]) ** 2) ** 0.5, q[0]) for q in opp]
+                dmin, oid = min(dq)
+                # 最近對手當下的速度（前後各 0.2 秒的中心差分；兩端都偵測到才算）
+                v = np.nan
+                a_, b_ = frames.get(f - 2), frames.get(f + 2)
+                if a_ is not None and b_ is not None:
+                    pa = next((q for q in a_ if q[0] == oid and q[3]), None)
+                    pb = next((q for q in b_ if q[0] == oid and q[3]), None)
+                    if pa and pb:
+                        v = ((pb[1] - pa[1]) ** 2 + (pb[2] - pa[2]) ** 2) ** 0.5 / 0.4
+                vc = np.nan                                            # 持球者自己的速度
+                if a_ is not None and b_ is not None:
+                    ca = next((q for q in a_ if q[0] == tr and q[3]), None)
+                    cb = next((q for q in b_ if q[0] == tr and q[3]), None)
+                    if ca and cb:
+                        vc = ((cb[1] - ca[1]) ** 2 + (cb[2] - ca[2]) ** 2) ** 0.5 / 0.4
+                out.append((x_att, k, float(min(dmin, 30.0)), float(v), float(vc)))
+    return out
+
+
+def format_reception(rows: list[tuple], name: str) -> str:
+    a = np.array(rows, float)
+    lines = [f"{name}：接球後最近對手距離（m；中位 [p25–p75]，n）／最近對手速度中位（m/s）——接球瞬間／0.5／1.0／1.5／2.0 秒"]
+    for lo, hi in ZONES:
+        m = (a[:, 0] >= lo) & (a[:, 0] < hi)
+        cells = []
+        for k in range(len(RECEPTION_OFFSETS)):
+            v = a[m & (a[:, 1] == k), 2]
+            sp = a[m & (a[:, 1] == k), 3]
+            sp = sp[np.isfinite(sp)]
+            cells.append(f"{np.median(v):.1f} [{np.percentile(v, 25):.1f}–{np.percentile(v, 75):.1f}] v{np.median(sp) if len(sp) else float('nan'):.1f} n={len(v)}" if len(v) > 20 else "—")
+        lines.append(f"  x {lo:.0f}–{hi:.0f}：" + "｜".join(cells))
+    return "\n".join(lines)
+
+
+def engagement_motion(match_id: int, subtypes=("pressing", "pressure", "counter_press", "recovery_press")) -> list[tuple]:
+    """逼搶事件（on_ball_engagement）期間防守者的速度與加速度（0.5 秒平滑、只用偵測到的位置）。
+    回傳 (事件子類型, 開始後經過秒數, 速度 m/s, 切線加速度 m/s²) 的樣本。"""
+    import csv
+
+    d = RAW / "skillcorner" / str(match_id)
+    traj = {}
+    with open(d / f"{match_id}_tracking_extrapolated.jsonl", encoding="utf-8") as fh:
+        for line in fh:
+            o = json.loads(line)
+            if o.get("period") is None or not o.get("player_data"):
+                continue
+            for p in o["player_data"]:
+                if p.get("is_detected"):
+                    traj.setdefault(p["player_id"], {})[o["frame"]] = (p["x"], p["y"])
+    out = []
+    with open(d / f"{match_id}_dynamic_events.csv", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r["event_type"] != "on_ball_engagement" or r["event_subtype"] not in subtypes or not r["player_id"]:
+                continue
+            tr = traj.get(int(r["player_id"]))
+            if tr is None:
+                continue
+            f0, f1 = int(r["frame_start"]) - 10, int(r["frame_end"]) + 5
+            fr = [f for f in range(f0, f1 + 1) if f in tr]
+            if len(fr) < f1 - f0 - 2:
+                continue
+            p = np.array([tr[f] for f in range(f0, f1 + 1) if f in tr], float)
+            if len(p) < 25:
+                continue
+            v, a = speed_acc(p, 10.0)
+            for i in range(len(p)):
+                if np.isfinite(v[i]) and np.isfinite(a[i]):
+                    out.append((r["event_subtype"], (f0 + i - int(r["frame_start"])) / 10.0, float(v[i]), float(a[i])))
     return out

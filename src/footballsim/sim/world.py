@@ -39,6 +39,8 @@ class Intent(IntEnum):
     RECEIVE = 4       # 去接球
     CHASE = 5         # 搶無主球
     CARRY = 6         # 持球推進
+    WAIT = 7          # 持球等待出手（追蹤資料：持球者接球後不會站著，速度中位數約 2–3 m/s）
+    ENGAGE = 8        # 離球最近的防守者貼近持球者（追蹤資料：最近的對手速度中位數約 4 m/s，不論距離）
 
 
 @dataclass

@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..engine import shape as v1shape
+from ..engine.pitch import CY, LENGTH
 from .phase import counter_press_slots
 from .world import Intent, Mode, Phase, World
 
@@ -83,10 +84,36 @@ def assign_intents(w: World) -> None:
         else:
             ahead = (w.tf(T, w.tgt[idx])[:, 0] - w.tf(T, w.pos[idx])[:, 0]) > 8.0
             intent[idx[ahead]] = Intent.RUN
+        if ph in (Phase.DT, Phase.OOP) and w.mode in (Mode.CARRIED, Mode.FLIGHT, Mode.FREE):
+            # 被越過的防守者（在球的後面、離自己球門比球遠）不管陣型位置離得多近，都要趕快回到球與球門之間
+            gk = sim.gk_slot(T)
+            cand = idx[idx != gk] if gk is not None else idx
+            att_dir = 1.0 if w.poss == 0 else -1.0                # 持球隊的進攻方向（全域 x）
+            behind = cand[(w.pos[cand, 0] - w.ball[0]) * att_dir < -w.sp.shape.beaten_margin]
+            danger = (w.ball[0] if w.poss == 0 else LENGTH - w.ball[0]) >= w.sp.shape.beaten_x
+            if danger:
+                intent[behind] = Intent.ENGAGE
         if ph == Phase.DT and w.mode != Mode.DEAD:
             for s in counter_press_slots(w, T):
-                intent[s] = Intent.PRESS
+                intent[s] = Intent.ENGAGE
                 w.tgt[s] = w.ball[:2]
+        elif ph == Phase.OOP and w.mode in (Mode.CARRIED, Mode.FLIGHT):
+            # 離球最近的幾名防守者一直在動、貼近持球者（真實：最近的對手速度中位數約 4 m/s，不論離多遠）
+            gk = sim.gk_slot(T)
+            cand = idx[idx != gk] if gk is not None else idx
+            nearest = cand[np.argsort(d_ball[cand])[: int(w.sp.shape.engage_n)]]
+            goal = np.array([LENGTH if w.poss == 0 else 0.0, CY])       # 持球隊進攻的球門
+            ug = goal - w.ball[:2]
+            ug = ug / max(float(np.hypot(*ug)), 1e-9)
+            for rank, s in enumerate(nearest):
+                if d_ball[s] <= w.sp.shape.engage_zone:
+                    intent[s] = Intent.ENGAGE
+                    # 站在持球者與球門之間（球門側）：第一人貼近、第二人在後面補位；v1 的逼搶觸發條件只在「已經很近」時才派人，
+                    # 逐幀下防守者的位置落後，沒人被派出去，持球者就沒有人站在射門路線上
+                    dist_t = w.sp.shape.engage_dist * (1.0 + 1.2 * rank)
+                    if abs(w.ball[0] - goal[0]) < 16.5 and abs(w.ball[1] - CY) < 20.0:
+                        dist_t *= 0.7
+                    w.tgt[s] = w.ball[:2] + ug * dist_t
     if w.mode == Mode.FREE:
         for T in (0, 1):
             act = np.array(w.active(T), int)
