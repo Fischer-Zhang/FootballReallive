@@ -14,6 +14,7 @@
 export PYTHONPATH=src
 python -m footballsim league                      # 生成 20 隊虛構聯賽 → data/league.json
 python -m footballsim match --home 0 --away 5     # 模擬一場並輸出中文報告（--events 列出事件）
+python -m footballsim tickmatch --home 0 --away 5  # v2 逐幀（10 Hz）引擎模擬一場（見 docs/v2-engine.md）
 python -m footballsim calibrate --matches 100     # 批次模擬並與五大聯賽實測統計比對
 python -m footballsim sensitivity finishing --groups ST,W,AM --mirror   # 屬性敏感度（加強版 vs 原版）
 python -m footballsim targets fetch               # 重新下載 football-data.co.uk 並計算比賽層目標

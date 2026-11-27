@@ -58,6 +58,20 @@ def cmd_match(a) -> None:
     print(f"\n（模擬耗時 {time.time() - t:.2f} 秒，事件 {len(res.events)} 筆）")
 
 
+def cmd_tickmatch(a) -> None:
+    """v2 逐幀引擎：模擬一場比賽並輸出報告（含跑動距離）"""
+    from .analytics.report import format_match
+    from .sim import simulate_tick_match
+
+    lg = _league(a.league)
+    t = time.time()
+    res = simulate_tick_match(lg.teams[a.home], lg.teams[a.away], seed=a.seed)
+    print(format_match(res, show_events=a.events))
+    d = sorted(res.distance.values(), reverse=True)
+    print(f"\n跑動距離（km）：平均 {sum(d) / len(d) / 1000:.1f}，最高 {d[0] / 1000:.1f}")
+    print(f"（逐幀模擬耗時 {time.time() - t:.1f} 秒，事件 {len(res.events)} 筆）")
+
+
 def cmd_calibrate(a) -> None:
     from .calibration.runner import aggregate, compare, format_comparison, run_batch
 
@@ -167,6 +181,14 @@ def main(argv=None) -> None:
     p.add_argument("--events", action="store_true", help="列出射門、紅黃牌、換人等事件")
     p.add_argument("--set", nargs="*", metavar="KEY=VALUE", help="覆寫參數，例如 shot.k_gk=0.25")
     p.set_defaults(func=cmd_match)
+
+    p = sub.add_parser("tickmatch", help="v2 逐幀引擎：模擬一場比賽並輸出報告")
+    p.add_argument("--league", default=str(DEFAULT_LEAGUE))
+    p.add_argument("--home", type=int, default=0)
+    p.add_argument("--away", type=int, default=1)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--events", action="store_true", help="列出射門、紅黃牌、換人等事件")
+    p.set_defaults(func=cmd_tickmatch)
 
     p = sub.add_parser("calibrate", help="批次模擬並與真實聯賽統計比對")
     p.add_argument("--league", default=str(DEFAULT_LEAGUE))
