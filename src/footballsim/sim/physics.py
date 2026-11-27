@@ -101,6 +101,8 @@ def speed_cap(w: World, dist: np.ndarray | None = None) -> np.ndarray:
         ramp = np.clip((dist - r0) / r1, 0.0, 1.0)
         scaled = (w.intent == int(Intent.RUN)) | (w.intent == int(Intent.PRESS)) | (w.intent == int(Intent.RECOVER))
         f = np.where(scaled, fr.hold + (f - fr.hold) * ramp, f)
+        # 保持陣型的人離目標很遠（球轉移、陣型整體移動）時也不會慢慢走：用 hold_far 的比例
+        f = np.where(w.intent == int(Intent.HOLD), fr.hold + (fr.hold_far - fr.hold) * ramp, f)
         lo, span = m.sprint_dist
         urgent = (w.intent != int(Intent.HOLD)) & (w.intent != int(Intent.CARRY)) & (w.intent != int(Intent.WAIT))
         f = np.where(urgent, f + (1.0 - f) * np.clip((dist - lo) / span, 0.0, 1.0), f)
@@ -138,7 +140,7 @@ def integrate(w: World, dt: float) -> None:
         w.vel[stunned] *= 0.5
         w.stun[stunned] = np.maximum(w.stun[stunned] - dt, 0.0)
     w.pos += w.vel * dt
-    np.clip(w.pos[:, 0], 0.0, LENGTH, out=w.pos[:, 0])
+    np.clip(w.pos[:, 0], 0.3, LENGTH - 0.3, out=w.pos[:, 0])         # 球員不會走進球門（帶球走過球門線不算進球）
     np.clip(w.pos[:, 1], 0.0, WIDTH, out=w.pos[:, 1])
     sp = np.hypot(w.vel[:, 0], w.vel[:, 1])
     w.dist_run += sp * dt

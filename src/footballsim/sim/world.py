@@ -65,8 +65,13 @@ class Flight:
 
 class World:
     def __init__(self, home, away, params=None, sim_params=None, seed: int = 0):
+        from ..config import load_params
+        params = params or load_params()                      # 每個 v2 世界用自己的參數物件，改它不會影響 v1 的全域預設
         self.sim = MatchSim(home, away, params, seed=seed)     # v1：屬性、參數、亂數流、威脅網格
         self.sp = sim_params or load_sim_params()
+        # v1 的橫向分位數抽籤每次決策漂移 0.25（約 3 m）；v2 每秒呼叫一次且球員實際要跑過去，寬位球員跟不上這種漂移，
+        # 結果都縮到中路。位置的橫向漂移改用較慢的速度。
+        params.shape.att_lateral_drift = self.sp.shape.lateral_drift
         self.seed = seed
         n = 22
         self.team_of = np.repeat([0, 1], 11)

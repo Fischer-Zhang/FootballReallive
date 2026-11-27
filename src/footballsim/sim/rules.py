@@ -58,7 +58,9 @@ def check_out(w: World) -> None:
     delay = float(w.sim.rng_ref.uniform(*w.sp.rules.restart_delay))
     if x >= LENGTH or x <= 0.0:
         atk = 0 if x >= LENGTH else 1           # 這個球門被誰攻擊
-        if abs(y - CY) <= GOAL_HEIGHT * 0 + GOAL_HALF and w.ball[2] < GOAL_HEIGHT:
+        # 進球 = 射門（或擋出後的無主球、烏龍）越過球門線；傳球、解圍的飛行越過球門線算出界
+        passing_flight = w.mode == Mode.FLIGHT and w.flight is not None and w.flight.kind != "shot"
+        if abs(y - CY) <= GOAL_HALF and w.ball[2] < GOAL_HEIGHT and not passing_flight:
             goal_scored(w, atk, lt)
             return
         if team == atk:                          # 攻方出底線：球門球

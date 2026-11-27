@@ -282,3 +282,58 @@ def engagement_motion(match_id: int, subtypes=("pressing", "pressure", "counter_
                 if np.isfinite(v[i]) and np.isfinite(a[i]):
                     out.append((r["event_subtype"], (f0 + i - int(r["frame_start"])) / 10.0, float(v[i]), float(a[i])))
     return out
+
+
+# ------------------------------------------------------------------ 防守方的陣型深度（SkillCorner 追蹤）
+def defence_shape(match_id: int, every: int = 10) -> list[tuple]:
+    """持球隊持球時（球被偵測到），防守方外野球員相對球的位置（座標以持球隊進攻方向為正）。
+    每 every 個畫面取一次。回傳 (球 x, 球離中線的距離, 在球與球門之間的人數, 最深防守者的 x, 最深 4 人的平均 x)。
+    防守方的人用含外推的追蹤位置（陣型深度要全員，被攝影機拍到的只是一部分）。"""
+    d = RAW / "skillcorner" / str(match_id)
+    meta = json.loads((d / f"{match_id}_match.json").read_text(encoding="utf-8"))
+    team_of = {p["id"]: p["team_id"] for p in meta["players"]}
+    gk = {p["id"] for p in meta["players"] if p["player_role"]["acronym"] == "GK"}
+    home, away = meta["home_team"]["id"], meta["away_team"]["id"]
+    rows_f = []
+    gk_x = {}                                           # (period, team_id) → 門將 x 的累計，用來判斷進攻方向
+    with open(d / f"{match_id}_tracking_extrapolated.jsonl", encoding="utf-8") as fh:
+        for line in fh:
+            o = json.loads(line)
+            if o.get("period") is None or not o.get("player_data"):
+                continue
+            pd_ = o["player_data"]
+            for p in pd_:
+                if p["player_id"] in gk:
+                    a = gk_x.setdefault((o["period"], team_of[p["player_id"]]), [0.0, 0])
+                    a[0] += p["x"]
+                    a[1] += 1
+            if o["frame"] % every == 0 and o["possession"]["group"] and o["ball_data"]["is_detected"]:
+                rows_f.append((o["period"], o["possession"]["group"], o["ball_data"]["x"], o["ball_data"]["y"],
+                               [(p["player_id"], p["x"], p["y"]) for p in pd_]))
+    out = []
+    for period, group, bx, by, pls in rows_f:
+        team = home if group == "home team" else away
+        gx = gk_x.get((period, team))
+        if not gx or not gx[1]:
+            continue
+        s = 1.0 if gx[0] / gx[1] < 0 else -1.0           # 門將在左邊 → 該隊往 +x 進攻
+        xb = bx * s + LENGTH / 2
+        defx = sorted(((p[1] * s + LENGTH / 2) for p in pls if team_of.get(p[0]) not in (None, team) and p[0] not in gk),
+                      reverse=True)
+        if len(defx) < 8:
+            continue
+        out.append((xb, abs(by), float(sum(1 for x in defx if x > xb)), float(defx[0]), float(np.mean(defx[:4]))))
+    return out
+
+
+def format_defence(rows: list[tuple], name: str) -> str:
+    a = np.array(rows, float)
+    lines = [f"{name}：球在持球隊進攻方向的 x 分段 → 球與球門之間的防守者人數 中位 [p25–p75]｜最深 4 人的平均 x − 球 x｜最深防守者 x − 球 x"]
+    for lo in range(30, 100, 10):
+        m = (a[:, 0] >= lo) & (a[:, 0] < lo + 10)
+        if m.sum() < 30:
+            continue
+        n = a[m, 2]
+        lines.append(f"  球 x {lo}–{lo + 10}：{np.median(n):.0f} [{np.percentile(n, 25):.0f}–{np.percentile(n, 75):.0f}]｜"
+                     f"{np.median(a[m, 4] - a[m, 0]):+.1f} m｜{np.median(a[m, 3] - a[m, 0]):+.1f} m  (n={m.sum()})")
+    return "\n".join(lines)

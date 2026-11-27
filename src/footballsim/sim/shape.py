@@ -89,10 +89,12 @@ def assign_intents(w: World) -> None:
             gk = sim.gk_slot(T)
             cand = idx[idx != gk] if gk is not None else idx
             att_dir = 1.0 if w.poss == 0 else -1.0                # 持球隊的進攻方向（全域 x）
-            behind = cand[(w.pos[cand, 0] - w.ball[0]) * att_dir < -w.sp.shape.beaten_margin]
+            behind = (w.pos[cand, 0] - w.ball[0]) * att_dir < -w.sp.shape.beaten_margin
+            # 陣型要他往本方球門退（目標點比現在的位置更深）：球推進時防線要跟著退，退得太慢就被越過
+            retreat = (w.tgt[cand, 0] - w.pos[cand, 0]) * att_dir > w.sp.shape.retreat_margin
             danger = (w.ball[0] if w.poss == 0 else LENGTH - w.ball[0]) >= w.sp.shape.beaten_x
             if danger:
-                intent[behind] = Intent.ENGAGE
+                intent[cand[behind | retreat]] = Intent.ENGAGE
         if ph == Phase.DT and w.mode != Mode.DEAD:
             for s in counter_press_slots(w, T):
                 intent[s] = Intent.ENGAGE
