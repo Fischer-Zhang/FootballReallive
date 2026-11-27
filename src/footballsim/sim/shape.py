@@ -82,7 +82,7 @@ def assign_intents(w: World) -> None:
                 intent[idx[zone]] = Intent.PRESS
 
         else:
-            ahead = (w.tf(T, w.tgt[idx])[:, 0] - w.tf(T, w.pos[idx])[:, 0]) > 8.0
+            ahead = (w.tf(T, w.tgt[idx])[:, 0] - w.tf(T, w.pos[idx])[:, 0]) > w.sp.shape.run_gap
             intent[idx[ahead]] = Intent.RUN
         if ph in (Phase.DT, Phase.OOP) and w.mode in (Mode.CARRIED, Mode.FLIGHT, Mode.FREE):
             # 被越過的防守者（在球的後面、離自己球門比球遠）不管陣型位置離得多近，都要趕快回到球與球門之間
@@ -94,7 +94,8 @@ def assign_intents(w: World) -> None:
             retreat = (w.tgt[cand, 0] - w.pos[cand, 0]) * att_dir > w.sp.shape.retreat_margin
             danger = (w.ball[0] if w.poss == 0 else LENGTH - w.ball[0]) >= w.sp.shape.beaten_x
             if danger:
-                intent[cand[behind | retreat]] = Intent.ENGAGE
+                intent[cand[retreat]] = Intent.RETREAT
+                intent[cand[behind]] = Intent.ENGAGE
         if ph == Phase.DT and w.mode != Mode.DEAD:
             for s in counter_press_slots(w, T):
                 intent[s] = Intent.ENGAGE

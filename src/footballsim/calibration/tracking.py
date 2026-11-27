@@ -337,3 +337,42 @@ def format_defence(rows: list[tuple], name: str) -> str:
         lines.append(f"  球 x {lo}–{lo + 10}：{np.median(n):.0f} [{np.percentile(n, 25):.0f}–{np.percentile(n, 75):.0f}]｜"
                      f"{np.median(a[m, 4] - a[m, 0]):+.1f} m｜{np.median(a[m, 3] - a[m, 0]):+.1f} m  (n={m.sum()})")
     return "\n".join(lines)
+
+
+def attack_lateral(match_id: int, every: int = 10, x_lo: float = 50.0, x_hi: float = 75.0) -> list[tuple]:
+    """持球隊持球時（球在進攻方向 x_lo–x_hi m），球前方 8 m 以上的攻方外野隊友離中線的距離與相對球的橫向位置（含外推位置）。
+    回傳 (離中線距離, 有號橫向位置（球所在側為正）, 球離中線的距離)。"""
+    d = RAW / "skillcorner" / str(match_id)
+    meta = json.loads((d / f"{match_id}_match.json").read_text(encoding="utf-8"))
+    team_of = {p["id"]: p["team_id"] for p in meta["players"]}
+    gk = {p["id"] for p in meta["players"] if p["player_role"]["acronym"] == "GK"}
+    home, away = meta["home_team"]["id"], meta["away_team"]["id"]
+    gk_x, frames = {}, []
+    with open(d / f"{match_id}_tracking_extrapolated.jsonl", encoding="utf-8") as fh:
+        for line in fh:
+            o = json.loads(line)
+            if o.get("period") is None or not o.get("player_data"):
+                continue
+            for p in o["player_data"]:
+                if p["player_id"] in gk:
+                    a = gk_x.setdefault((o["period"], team_of[p["player_id"]]), [0.0, 0])
+                    a[0] += p["x"]
+                    a[1] += 1
+            if o["frame"] % every == 0 and o["possession"]["group"] and o["ball_data"]["is_detected"]:
+                frames.append((o["period"], o["possession"]["group"], o["ball_data"]["x"], o["ball_data"]["y"],
+                               o["possession"]["player_id"], [(p["player_id"], p["x"], p["y"]) for p in o["player_data"]]))
+    out = []
+    for period, group, bx, by, holder, pls in frames:
+        team = home if group == "home team" else away
+        g = gk_x.get((period, team))
+        if not g or not g[1]:
+            continue
+        s = 1.0 if g[0] / g[1] < 0 else -1.0
+        xb = bx * s + LENGTH / 2
+        if not x_lo <= xb < x_hi:
+            continue
+        sg = 1.0 if by >= 0 else -1.0                      # 追蹤座標的 y 以球場中線為 0
+        for pid, px, py in pls:
+            if team_of.get(pid) == team and pid not in gk and pid != holder and (px * s + LENGTH / 2) - xb >= 8.0:
+                out.append((abs(py), py * sg, abs(by)))
+    return out

@@ -94,7 +94,7 @@ def speed_cap(w: World, dist: np.ndarray | None = None) -> np.ndarray:
     很遠（意圖比例之後再加距離）才衝刺到全速；接球與持球推進用固定比例。追蹤資料：> 5.5 m/s 只占約 2% 的時間。"""
     m = w.sp.motion
     fr = m.frac
-    table = np.array([fr.hold, fr.run, fr.press, fr.recover, fr.receive, fr.chase, fr.carry, fr.wait, fr.engage])
+    table = np.array([fr.hold, fr.run, fr.press, fr.recover, fr.receive, fr.chase, fr.carry, fr.wait, fr.engage, fr.retreat])
     f = table[w.intent]
     if dist is not None:
         r0, r1 = m.ramp
