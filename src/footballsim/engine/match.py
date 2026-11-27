@@ -116,6 +116,9 @@ class MatchSim:
         self.gpos: Optional[np.ndarray] = None   # 上一個快照的全域座標（位置連續性）
         self.last_shape_elapsed = 0.0
         self._box_cfg: Optional[int] = None      # 禁區跑位沿用的真實站位組合（shape._box_runs）
+        self._hold: Optional[float] = None       # 這次決策的持球時間（open_play 抽一次）
+        sp = p.sprint
+        self.v_ref = sp.vmax_a + sp.vmax_b * self.R   # 平均水準球員的最高速度（逼近速度的基準）
         self.traits: List[dict] = [{} for _ in range(n)]
 
         self.events: List[Event] = []
@@ -263,10 +266,23 @@ class MatchSim:
         if self.gpos is not None:
             self.gpos[s] = self.to_global(frame, x, y)
 
-    def decide_time(self) -> float:
+    def draw_hold(self) -> float:
+        """持球到出手的時間（s）；戰術節奏越快越短"""
         lo, hi = self.p.decision.decide_time
         tempo = self.teams[self.poss].tactics.tempo
         return float(self.rng_act.uniform(lo, hi)) * (1.0 - 0.06 * (tempo - 3))
+
+    def decide_time(self) -> float:
+        """這次持球的持球時間。open_play 在每次決策開頭抽一次，逼搶者能逼近多遠、持球者能帶多遠、
+        動作耗時都用同一個值（同一個物理量不抽兩次）"""
+        return self._hold if self._hold is not None else self.draw_hold()
+
+    def hold_time(self) -> float:
+        """陣型計算用：決策中用抽到的值；定位球等沒有抽時用期望值"""
+        if self._hold is not None:
+            return self._hold
+        lo, hi = self.p.decision.decide_time
+        return 0.5 * (lo + hi) * (1.0 - 0.06 * (self.teams[self.poss].tactics.tempo - 3))
 
     def advance_dead(self, seconds: float) -> None:
         self.t += seconds
@@ -310,9 +326,13 @@ class MatchSim:
     def open_play(self) -> Outcome:
         team, c = self.poss, self.carrier
         bx, by = self.to_frame(team, *self.ball)
-        pos, off_line = shape.compute(self, team, bx, by, c)
-        opt = decision.choose(self, team, c, pos, off_line, None)
-        return actions.resolve(self, team, c, pos, off_line, opt, None)
+        self._hold = self.draw_hold()
+        try:
+            pos, off_line = shape.compute(self, team, bx, by, c)
+            opt = decision.choose(self, team, c, pos, off_line, None)
+            return actions.resolve(self, team, c, pos, off_line, opt, None)
+        finally:
+            self._hold = None
 
     def apply(self, out: Outcome) -> None:
         if not (math.isfinite(out.duration) and out.duration > 0):

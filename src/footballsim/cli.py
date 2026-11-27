@@ -115,15 +115,20 @@ def cmd_statsbomb(a) -> None:
         pool = fit360.box_run_pool(frames)
         n_spots = sum(len(f[2]) for f in pool)
         print(f"禁區跑位組合 → {fit360.save_box_pool(pool)}（{len(pool)} 個畫面、{n_spots} 個站位）")
+        lat = fit360.fit_att_lateral(frames)
+        print(f"橫向站位（攻守雙方）→ {fit360.save_att_lateral(lat)}（{sum(sum(r) for r in lat['_frames'])} 個畫面）")
         geo = fit360.geo_actions(frames)
         sp, cp, kp = (fit360.fit_shot_propensity(geo), fit360.fit_cross_propensity(geo),
                       fit360.fit_clear_propensity(geo))
         pc = fit360.fit_pass_choice(frames)
         pss, phh = fit360.fit_pass_success(frames)
         gp = fit360.fit_carry_propensity(frames)
-        print(f"行為與傳球模型（位置特徵）→ {fit360.save_fitted360(sp, cp, kp, pc, pss, phh, gp)}")
+        cc = fit360.fit_carry_choice(frames)
+        tq = fit360.fit_through_propensity(frames)
+        tc = fit360.fit_through_choice(frames)
+        print(f"行為與傳球模型（位置特徵）→ {fit360.save_fitted360(sp, cp, kp, pc, pss, phh, gp, cc, tq, tc)}")
         for name, m in (("射門", sp), ("傳中", cp), ("解圍", kp), ("帶球", gp), ("傳球對象", pc), ("傳球成功率", pss),
-                        ("傳球高度", phh)):
+                        ("傳球高度", phh), ("帶球方向", cc), ("身後球", tq), ("身後球接球者", tc)):
             print(f"  {name}：" + "、".join(f"{k}={v}" for k, v in m.items()))
         return
     df = sb.load()

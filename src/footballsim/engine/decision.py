@@ -15,7 +15,7 @@ import numpy as np
 from ..model.attributes import ATTR
 from .core_math import (duel_prob, logit, np_logit, np_sigmoid, np_sprint_time, pressure_mod, race_prob,
                         shot_geometry, shot_outcome_probs, sigmoid, sprint_time)
-from .pitch import BOX_HALF, CY, LENGTH, NEAR_CAP, WIDTH, shot_context
+from .pitch import BOX_HALF, BOX_X, CY, LENGTH, NEAR_CAP, WIDTH, shot_context
 from .shape import interp
 
 SET_PIECE_MODES = {"kickoff", "goal_kick", "free_kick", "corner_short", "gk_hands"}
@@ -97,7 +97,7 @@ def space_ahead(bx: float, by: float, O: np.ndarray) -> float:
 
 class _Ctx:
     __slots__ = ("T", "D", "c", "bx", "by", "pos", "mates", "dfd", "d_out", "gk_d", "P",
-                 "kappa", "m", "t_out_x", "mode", "off_line", "d_opp", "space")
+                 "kappa", "m", "t_out_x", "mode", "off_line", "d_opp", "space", "carry_len")
 
 
 def make_context(sim, T: int, c: int, pos, off_line: float, mode=None) -> _Ctx:
@@ -105,6 +105,7 @@ def make_context(sim, T: int, c: int, pos, off_line: float, mode=None) -> _Ctx:
     d = sim.p.decision
     x = _Ctx()
     x.T, x.D, x.c, x.pos, x.mode, x.off_line = T, 1 - T, c, pos, mode, off_line
+    x.carry_len = None            # 這次想帶多遠；None＝帶球速度 × 持球時間（360 擬合時填入真實的帶球長度）
     x.bx, x.by = float(pos[c, 0]), float(pos[c, 1])
     x.mates = [s for s in sim.active_slots(T) if s != c]
     x.dfd = sim.active_slots(x.D)
@@ -130,8 +131,6 @@ def choose(sim, T: int, c: int, pos, off_line: float, mode=None) -> Opt:
     opts: list[Opt] = []
     _passes(sim, x, opts)
     if mode is None:
-        _through(sim, x, opts)
-        _carries(sim, x, opts)
         _take_on(sim, x, opts)
         _shot(sim, x, opts)
         _cross(sim, x, opts)
@@ -151,10 +150,23 @@ def choose(sim, T: int, c: int, pos, off_line: float, mode=None) -> Opt:
         return _select(sim, x, cand)
     # 決策順序與資料定義一致：先以資料擬合的帶球傾向決定「這次是不是帶球 ≥ 3 m」（方向與距離再以效用比較）；
     # 射門／傳中／解圍的行為模型擬合時樣本不含帶球，所以只套用在不帶球的決策上。
-    carries = [o for o in opts if o.kind == "carry"]
-    if carries and sim.rng_dec.random() < carry_probability(sim, x):
-        return _select(sim, x, carries)
-    rest = [o for o in opts if o.kind not in ("shot", "cross", "clear", "carry")]
+    # 帶球選項要算 12 個方向的追截封堵，所以先抽閘門，通過了才生成（沒有可帶的方向時繼續走其他選項）
+    if sim.rng_dec.random() < carry_probability(sim, x):
+        carries: list[Opt] = []
+        _carries(sim, x, carries)
+        if carries:
+            return _select_carry(sim, x, carries)
+    # 身後球也是行為閘門：嘗試的機率由資料決定，通過了才在各接球者與深度之間比較效用
+    runners = through_runners(sim, x)
+    if runners and sim.rng_dec.random() < through_probability(sim, x, len(runners)):
+        th: list[Opt] = []
+        first = pick_through_runner(sim, x, runners)
+        _through(sim, x, th, [first])
+        if not th and len(runners) > 1:          # 這位接球者沒有可行的深度（防線附近沒有空間）：改看全部
+            _through(sim, x, th, runners)
+        if th:
+            return _select(sim, x, th)
+    rest = [o for o in opts if o.kind not in ("shot", "cross", "clear")]
     pick = _select(sim, x, rest) if rest else None
     if x.bx <= 35:
         # 本方三區：以資料擬合的機率選擇解圍（對手越近、越靠近本方球門越常直接踢遠）
@@ -360,11 +372,6 @@ def _passes(sim, x: _Ctx, opts) -> None:
             z = z + ph.k_buildup * {"short": -1.0, "mixed": 0.0, "long": 1.0}[tac.buildup]
         return np.where(dist > ps.ground_max, 1.0, np_sigmoid(z))
 
-    need = dist > d.vision_dist
-    if need.any():
-        see = np_sigmoid((sim.eff[c, ATTR.VISION] - (d.vision_base + dist)) / 8.0)
-        valid &= (~need) | (sim.rng_dec.random(n) < see)
-
     q = height_q(dist, lane, V, gk_r)
     p_true, v_s, v_f, bias, p_g, p_l = evaluate(A, V, dist, lane, rpa, rp, gk_r, q)
     feat = None
@@ -444,17 +451,69 @@ def _lead_passes(sim, x: _Ctx, A, V, valid, p_feet, vs_feet, vf_feet, evaluate, 
     return out
 
 
-def _through(sim, x: _Ctx, opts) -> None:
-    tp, d, C, R = sim.p.through, sim.p.decision, sim.C, sim.R
-    space = LENGTH - 6.0 - x.off_line
-    if space < tp.min_space or not x.d_out:
-        return
+def through_runners(sim, x: _Ctx) -> list:
+    """身後球的候選接球者：防線附近（不比防線深 8 m 以上）、在持球者前方 2 m 以上的隊友（與 360 擬合的定義相同；
+    上限 max_options 名只為了限制計算量，取最靠近防線的）。防線後到底線之間沒有空間時沒有身後球。
+    （行為閘門與選項生成共用；傳給誰由 pick_through_runner 決定）"""
+    tp = sim.p.through
+    if LENGTH - tp.goal_line_margin - x.off_line < tp.min_space or not x.d_out:
+        return []
     pos = x.pos
     runners = [s for s in x.mates if not sim.is_gk(s)
                and pos[s, 0] >= x.off_line - 8 and pos[s, 0] > x.bx + 2]
+    return sorted(runners, key=lambda s: abs(pos[s, 0] - x.off_line))[: int(tp.max_options)]
+
+
+THROUGH_CHOICE_FEATURES = ("dist", "dist2", "lat", "lat_gap", "depth", "space", "lane")
+
+
+def through_choice_features(bx: float, by: float, line: float, R: np.ndarray, sep: np.ndarray,
+                            lane: np.ndarray) -> np.ndarray:
+    """身後球接球者選擇模型的特徵（360 擬合與引擎共用）：接球者 R (n, 2) 在出球瞬間的位置與處境。
+    距離（含平方）、離中路的距離、與持球者的橫向差、已經比防線深多少、身邊空間、傳球路線的攔截威脅。"""
+    dx, dy = R[:, 0] - bx, R[:, 1] - by
+    d = np.hypot(dx, dy) / 10
+    return np.column_stack([d, d * d, np.abs(R[:, 1] - CY) / 10, np.abs(dy) / 10, (R[:, 0] - line) / 10,
+                            np.minimum(sep, 10.0) / 5, lane])
+
+
+def pick_through_runner(sim, x: _Ctx, runners: list) -> int:
+    """身後球傳給哪一位：資料擬合的條件 logit（真實球員在這些接球者之間的選擇），不再只取最靠前的幾人
+    （那會讓直塞幾乎都傳給中路前鋒，邊路的跑動者被排除）。決策越高，越接近資料中的選擇方式（與傳球對象相同）。"""
+    if len(runners) == 1:
+        return runners[0]
+    tc = sim.p.through_choice
+    A = x.pos[runners]
+    _, _, _, lane, _, _ = _pass_geometry(sim, x, A)
+    Dp = x.pos[x.dfd]
+    sep = np.sqrt(((A[:, None, :] - Dp[None, :, :]) ** 2).sum(-1)).min(1)
+    F = through_choice_features(x.bx, x.by, x.off_line, A, sep, lane)
+    beta = np.array([getattr(tc, f) for f in THROUGH_CHOICE_FEATURES])
+    u = (1.0 + tc.k_dec * (sim.eff[x.c, ATTR.DECISIONS] - sim.R) / 100) * (F @ beta)
+    w = np.exp(u - u.max())
+    return runners[int(sim.rng_dec.choice(len(runners), p=w / w.sum()))]
+
+
+def through_probability(sim, x: _Ctx, n_runners: int) -> float:
+    """身後球傾向：真實球員在此位置、最近對手在此距離、防線附近有這麼多接球者時，把球送到防線之後的機率
+    （StatsBomb 360 擬合），再依傳球者的直塞能力（視野、短傳、長傳、技術）、戰術 directness 與特質調整。
+    選哪個接球者、球送多深，仍由效用比較決定（_through）。"""
+    tq, R = sim.p.through_propensity, sim.R
+    z = (tq.g0 + tq.g_x * x.bx / 10 + tq.g_wide * abs(x.by - CY) / 10 + tq.g_near * x.d_opp
+         + tq.g_run * min(n_runners, 3) + tq.g_gap * (x.off_line - x.bx) / 10 + tq.align
+         + tq.k_skill * (sim.comp[x.c, sim.C.THROUGH_PASS] - R) / 10
+         + tq.k_policy * (sim.teams[x.T].tactics.directness - 3)
+         + tq.k_trait * sim.traits[x.c].get("tries_killer_balls", 0.0))
+    return sigmoid(z)
+
+
+def _through(sim, x: _Ctx, opts, runners=None) -> None:
+    tp, d, C, R = sim.p.through, sim.p.decision, sim.C, sim.R
+    if runners is None:
+        runners = through_runners(sim, x)
     if not runners:
         return
-    runners = sorted(runners, key=lambda s: -pos[s, 0])[: int(tp.max_options)]
+    pos = x.pos
     comp, eff = sim.comp, sim.eff
     c = x.c
     coord = float(comp[x.d_out, C.LINE_COORD].mean())
@@ -464,39 +523,121 @@ def _through(sim, x: _Ctx, opts) -> None:
     pm = pressure_mod(x.P, eff[c, ATTR.COMPOSURE], sim.p.pressure.c)
     Dp = pos[x.d_out]
     for j in runners:
-        sx = min(x.off_line + min(tp.depth, space), LENGTH - 2.0)
         sy = float(pos[j, 1])
-        lane, thr = lane_threat(sim, x.bx, x.by, sx, sy, pos, x.d_out)
-        if sim.rng_dec.random() >= sigmoid((eff[c, ATTR.VISION] - (tp.difficulty + 6.0 * lane)) / 8.0):
-            continue
-        dS = math.hypot(sx - x.bx, sy - x.by)
-        p_exec = sigmoid(tp.b0 - tp.b_dist * dS + sim.p.passing.k_att * (comp[c, C.THROUGH_PASS] - R) / 10
-                         - sim.p.passing.c_lane * lane + pm)
-        t_a = (tp.att_react - 0.002 * (comp[j, C.ATT_TIMING] - R)
-               + sprint_time(math.hypot(sx - pos[j, 0], sy - pos[j, 1]), sim.vmax[j], sim.tau[j]))
-        dd = np.hypot(Dp[:, 0] - sx, Dp[:, 1] - sy)
-        i = int(np.argmin(dd))
-        k = x.d_out[i]
-        t_d = (tp.def_react - 0.0025 * (eff[k, ATTR.ANTICIPATION] - R)
-               - 0.001 * (eff[k, ATTR.CONCENTRATION] - R) + sprint_time(float(dd[i]), sim.vmax[k], sim.tau[k]))
-        p_race = race_prob(t_a, t_d, tp.race_noise)
-        p_gk = 1.0
-        g = x.gk_d
-        if g is not None and sx >= 85 and abs(sy - CY) <= 22:
-            dg = math.hypot(pos[g, 0] - sx, pos[g, 1] - sy)
-            t_g = (tp.gk_react - 0.003 * (eff[g, ATTR.GK_SWEEPING] - R)
-                   + sprint_time(dg, sim.vmax[g], sim.tau[g]) + tp.gk_handicap)
-            p_gk = race_prob(t_a, t_g, tp.race_noise)
-        p_off = sigmoid(tp.offside_b0 + tp.offside_k * (coord - comp[j, C.ATT_TIMING]) / 10 + trap)
-        p_true = p_exec * p_race * p_gk * (1 - p_off)
-        bias = (d.trait_bias * sim.traits[c].get("tries_killer_balls", 0.0)
-                + 0.5 * d.trait_bias * sim.traits[j].get("plays_on_shoulder", 0.0)
-                + d.flair_bias * (eff[c, ATTR.FLAIR] - 50) / 50)
-        # 突破防線後的單刀價值：xT 只看位置，會低估中場附近的身後球
-        brk = tp.breakaway_v0 * math.exp(-math.hypot(LENGTH - sx, CY - sy) / tp.breakaway_scale)
-        opts.append(Opt("through", j, sx, sy, p_true, max(sim.threat.xt_at(sx, sy), brk),
-                        -x.kappa * sim.threat.xt_opp(sx, sy), bias,
-                        (p_exec, p_race, p_gk, p_off, k, thr, list(x.d_out))))
+        last_sx = -1.0
+        # 球送多深是傳球者的決策：在接球者前方多個深度各算一次成功率與價值（深的價值高，但接球者的跑動、
+        # 防守者與守門員的競速更難、球越過底線的風險更大），由效用比較選擇
+        for dep in tp.depths:
+            sx = min(pos[j, 0] + dep, LENGTH - tp.goal_line_margin)
+            if sx < x.off_line + 1.0 or sx <= last_sx:
+                continue
+            last_sx = sx
+            _through_option(sim, x, opts, j, sx, sy, coord, trap, pm, Dp)
+
+
+def _through_option(sim, x: _Ctx, opts, j: int, sx: float, sy: float, coord: float, trap: float, pm: float,
+                    Dp: np.ndarray) -> None:
+    tp, d, C, R = sim.p.through, sim.p.decision, sim.C, sim.R
+    pos, comp, eff, c = x.pos, sim.comp, sim.eff, x.c
+    lane, thr = lane_threat(sim, x.bx, x.by, sx, sy, pos, x.d_out)
+    # 球送得到落點的機率：與一般傳球、跑動路線傳球相同的 360 擬合成功率模型（距離、路線攔截、傳球者受壓、
+    # 傳球高度的選擇）；不含接球點的到達壓力（接球者與防守者誰先到由下面的追跑競速決定）。
+    # 直塞的複合能力與冷靜只做偏移。
+    ps, ph, pp = sim.p.pass_success, sim.p.pass_height, sim.p.passing
+    _, dist_a, _, lane_a, _, _ = _pass_geometry(sim, x, np.array([[sx, sy]]))
+    dS, lane_f = float(dist_a[0]), float(lane_a[0])
+    shift = (ps.k_comp * math.sqrt(max(x.P, 0.0)) * (eff[c, ATTR.COMPOSURE] - R) / 10
+             + pp.k_att * (comp[c, C.THROUGH_PASS] - R) / 10)
+    p_g = sigmoid(float(pass_success_logit(ps, dS, lane_f, 0.0, x.P, 0.0, 0.0, 0.0)) + shift)
+    p_l = sigmoid(float(pass_success_logit(ps, dS, lane_f, 0.0, x.P, 0.0, 0.0, 1.0)) + shift)
+    q = 1.0 if dS > ps.ground_max else sigmoid(float(lofted_logit(ph, dS, lane_f, x.P, 0.0, 0.0, x.bx)))
+    p_exec = q * p_l + (1.0 - q) * p_g
+    t_a = (tp.att_react - 0.002 * (comp[j, C.ATT_TIMING] - R)
+           + sprint_time(math.hypot(sx - pos[j, 0], sy - pos[j, 1]), sim.vmax[j], sim.tau[j]))
+    dd = np.hypot(Dp[:, 0] - sx, Dp[:, 1] - sy)
+    i = int(np.argmin(dd))
+    k = x.d_out[i]
+    t_d = (tp.def_react - 0.0025 * (eff[k, ATTR.ANTICIPATION] - R)
+           - 0.001 * (eff[k, ATTR.CONCENTRATION] - R) + sprint_time(float(dd[i]), sim.vmax[k], sim.tau[k]))
+    p_race = race_prob(t_a, t_d, tp.race_noise)
+    p_gk = 1.0
+    g = x.gk_d
+    if g is not None and sx >= 85 and abs(sy - CY) <= 22:
+        dg = math.hypot(pos[g, 0] - sx, pos[g, 1] - sy)
+        t_g = (tp.gk_react - 0.003 * (eff[g, ATTR.GK_SWEEPING] - R)
+               + sprint_time(dg, sim.vmax[g], sim.tau[g]) + tp.gk_handicap)
+        p_gk = race_prob(t_a, t_g, tp.race_noise)
+    p_off = sigmoid(tp.offside_b0 + tp.offside_k * (coord - comp[j, C.ATT_TIMING]) / 10 + trap)
+    p_true = p_exec * p_race * p_gk * (1 - p_off)
+    bias = (d.trait_bias * sim.traits[c].get("tries_killer_balls", 0.0)
+            + 0.5 * d.trait_bias * sim.traits[j].get("plays_on_shoulder", 0.0)
+            + d.flair_bias * (eff[c, ATTR.FLAIR] - 50) / 50)
+    # 突破防線後的單刀價值：xT 只看位置，會低估中場附近的身後球
+    brk = tp.breakaway_v0 * math.exp(-math.hypot(LENGTH - sx, CY - sy) / tp.breakaway_scale)
+    opts.append(Opt("through", j, sx, sy, p_true, max(sim.threat.xt_at(sx, sy), brk),
+                    -x.kappa * sim.threat.xt_opp(sx, sy), bias,
+                    (p_exec, p_race, p_gk, p_off, k, thr, list(x.d_out))))
+
+
+CARRY_CHOICE_FEATURES = ("fwd", "back", "len", "lat_in", "lat_abs", "space", "xt_gain", "end_dy",
+                         "fwd_own", "fwd_final", "lat_final", "dy_final", "in_box",
+                         "lat_wide", "fwd_wide", "back_wide", "space_final", "len_final")
+
+
+def carry_choice_features(bx: float, by: float, ex: np.ndarray, ey: np.ndarray, dist: np.ndarray,
+                          space_end: np.ndarray, xt_gain: np.ndarray) -> np.ndarray:
+    """帶球方向選擇模型的特徵（360 擬合與引擎共用）：每個帶球選項（方向 + 可帶的距離）的終點處境。
+    lat_in = 往中路的橫向位移（持球者在中路時為 0）；space = 終點最近防守者的距離；xt_gain = 終點與起點的 xT 差。"""
+    dx = ex - bx
+    lat = (ey - by) * float(np.sign(CY - by))
+    own, fin = float(bx < 35), float(bx >= 70)
+    dy_end = np.abs(ey - CY) / 10
+    in_box = ((ex >= BOX_X) & (np.abs(ey - CY) <= BOX_HALF)).astype(float)
+    wide = abs(by - CY) / 10                                  # 持球者離中路的程度：邊路的帶球方向與中路不同
+    back = (dx < -2.0).astype(float)
+    space = np.minimum(space_end, 10.0) / 5
+    ln = np.asarray(dist) / 10
+    return np.column_stack([dx / 10, back, ln, lat / 10, np.abs(ey - by) / 10, space, 20 * np.asarray(xt_gain), dy_end,
+                            dx / 10 * own, dx / 10 * fin, lat / 10 * fin, dy_end * fin, in_box,
+                            lat / 10 * wide, dx / 10 * wide, back * wide, space * fin, ln * fin])
+
+
+def _select_carry(sim, x: _Ctx, carries) -> Opt:
+    """帶球的方向：資料基準 + 屬性與戰術的偏移（設計原則 P2：基準來自資料，屬性只負責偏移）。
+    - 基準：360 擬合的條件 logit（平均球員、中性戰術下，真實球員選擇各方向的傾向）。
+    - 屬性：這名持球者的成功率相對平均持球者的差（帶球、觸球、平衡、力量，經由引擎自己的搶斷模型）乘上
+      選項的價值差（成功價值 − 失敗價值），除以原本效用比較的溫度（決策、受壓與冷靜決定）。
+      所以帶球好的球員敢往風險大、價值高的方向走，差的球員保守；失敗的代價隨心態（kappa）變。
+    - 戰術：directness 偏向前進、width 偏向終點離中路遠（戰術指示；係數屬模型假設）；特質「內切」加在往中路的選項。
+    決策越高，越接近資料中的選擇方式，也更能精準權衡風險。"""
+    cc, d = sim.p.carry_choice, sim.p.decision
+    if not cc.enabled or any(o.feat is None for o in carries):
+        return _select(sim, x, carries)
+    dec = sim.eff[x.c, ATTR.DECISIONS]
+    beta = np.array([getattr(cc, f) for f in CARRY_CHOICE_FEATURES])
+    F = np.vstack([o.feat for o in carries])
+    u = (1.0 + cc.k_dec * (dec - sim.R) / 100) * (F @ beta)
+    p = np.fromiter((o.p for o in carries), float, len(carries))
+    p_ref = np.fromiter((1.0 - o.data[0] * o.data[3] for o in carries), float, len(carries))
+    vs = np.fromiter((o.v_s for o in carries), float, len(carries))
+    vf = np.fromiter((o.v_f for o in carries), float, len(carries))
+    ref = max(abs(float((p * vs + (1 - p) * vf).max())), d.u_floor)
+    stress = 1 + 0.5 * x.P * (1 - sim.eff[x.c, ATTR.COMPOSURE] / 100)
+    u = u + (p - p_ref) * (vs - vf) / (d.t_rel * (1.5 - dec / 100) * stress * ref)
+    tac = sim.teams[x.T].tactics
+    u = u + cc.k_directness * (tac.directness - 3) * F[:, CARRY_CHOICE_FEATURES.index("fwd")]
+    u = u + cc.k_width * (tac.width - 3) * F[:, CARRY_CHOICE_FEATURES.index("end_dy")]
+    cut = sim.traits[x.c].get("cuts_inside", 0.0)
+    if cut and abs(x.by - CY) > 10:
+        u = u + cc.k_trait * cut * np.array([(o.y - x.by) * (CY - x.by) > 0 for o in carries], float)
+    w = np.exp(u - u.max())
+    return carries[int(sim.rng_dec.choice(len(carries), p=w / w.sum()))]
+
+
+def desired_carry_length(sim, c: int) -> float:
+    """這次持球想帶多遠（m）：持球者在持球時間內以帶球速度跑的距離（帶球速度 × 持球時間）。
+    速度屬性、體能（有效最高速）與戰術節奏（縮短持球時間）都會改變它；實際能帶多遠再受防守者追截限制。"""
+    return sim.p.carry.speed_frac * float(sim.vmax[c]) * sim.decide_time()
 
 
 def _carries(sim, x: _Ctx, opts) -> None:
@@ -504,11 +645,12 @@ def _carries(sim, x: _Ctx, opts) -> None:
     pos, c = x.pos, x.c
     if sim.is_gk(c):
         return
+    L = min(x.carry_len if x.carry_len is not None else desired_carry_length(sim, c), cp.max_dist)
     # 帶球路線的追跑封堵：對手（含門將）只要能比持球者先抵達路線上某點的觸球範圍，帶球就在那之前停下。
     # 持球者以帶球速度（最高速 × speed_frac）起跑；防守者要先反應（預判越好越快），再以自己的速度與加速度追。
     # 例外：站在持球者與球門之間、jockey_range 內的貼身者會邊退邊守，不衝去封堵路線（360：這種情況下帶球
     # 平均仍有 8 m）；他維持原本的距離跟著持球者，帶球結束時由他負責搶斷。
-    S = np.arange(cp.step, cp.max_dist + 1e-9, cp.step)
+    S = np.arange(cp.step, L + 1e-9, cp.step)
     t_c = np_sprint_time(S, cp.speed_frac * sim.vmax[c], sim.tau[c])
     jockey = np.zeros(0, dtype=bool)
     if x.dfd:
@@ -526,25 +668,28 @@ def _carries(sim, x: _Ctx, opts) -> None:
     cut = sim.traits[c].get("cuts_inside", 0.0)
     tempo = sim.teams[x.T].tactics.tempo
     rs = sim.p.pressure.recv_sigma
+    n0, spaces = len(opts), []
     for ang in cp.angles:
         ux, uy = math.cos(ang), math.sin(ang)
-        px = np.minimum(x.bx + ux * S, LENGTH - 1.0)
+        px = np.clip(x.bx + ux * S, 1.0, LENGTH - 1.0)
         py = np.clip(x.by + uy * S, 1.0, WIDTH - 1.0)
-        free = cp.max_dist
+        free = L
         if x.dfd and len(B):
             gap = np.hypot(B[:, 0:1] - px[None, :], B[:, 1:2] - py[None, :]) - cp.reach
             hit = ((react + np_sprint_time(gap, vb, tb)) <= t_c[None, :]).any(0)
             if hit.any():
                 free = float(S[int(np.argmax(hit))]) - cp.stop_short
-        dist = min(free, cp.max_dist)
+        dist = min(free, L)
         if dist < cp.min_dist:
             continue
-        ex = min(x.bx + ux * dist, LENGTH - 1.0)
+        ex = min(max(x.bx + ux * dist, 1.0), LENGTH - 1.0)
         ey = min(max(x.by + uy * dist, 1.0), WIDTH - 1.0)
-        k, p_att, p_tk = None, 0.0, 0.0
+        k, p_att, p_tk, p_tk_ref = None, 0.0, 0.0, 0.0
+        space_end = 10.0
         if x.dfd:
             # 帶球結束時最近的防守者：貼身者維持原本距離，其他人以站位計算
             de = np.where(jockey, d0, np.hypot(B_all[:, 0] - ex, B_all[:, 1] - ey))
+            space_end = float(de.min())
             outfield = np.array([s != x.gk_d for s in x.dfd])
             if outfield.any():
                 i = int(np.argmin(np.where(outfield, de, np.inf)))
@@ -553,6 +698,7 @@ def _carries(sim, x: _Ctx, opts) -> None:
                                 + 0.15 * (sim.eff[k, ATTR.AGGRESSION] - R) / 10)
                 p_tk = duel_prob(cp.base_tackle, sim.comp[k, C.TACKLE], retain, cp.k_att, cp.k_def,
                                  0.3 * x.P, R)
+                p_tk_ref = duel_prob(cp.base_tackle, sim.comp[k, C.TACKLE], R, cp.k_att, cp.k_def, 0.3 * x.P, R)
         # 帶球結束時的處境：防守者在帶球期間（反應後）朝終點逼近，貼身者維持原本距離；
         # 終點的壓力與傳球接應者用同一個折價規則
         v_s = sim.threat.xt_at(ex, ey)
@@ -571,7 +717,15 @@ def _carries(sim, x: _Ctx, opts) -> None:
         bias = d.tempo_bias * (tempo - 3)
         if cut and abs(x.by - CY) > 10 and (ey - x.by) * (CY - x.by) > 0:
             bias += d.trait_bias * cut
-        opts.append(Opt("carry", k, ex, ey, 1 - p_att * p_tk, v_s, v_f, bias, (p_att, p_tk, dist)))
+        opts.append(Opt("carry", k, ex, ey, 1 - p_att * p_tk, v_s, v_f, bias, (p_att, p_tk, dist, p_tk_ref)))
+        spaces.append(space_end)
+    new = opts[n0:]
+    if new:
+        E = np.array([[o.x, o.y] for o in new])
+        F = carry_choice_features(x.bx, x.by, E[:, 0], E[:, 1], np.array([o.data[2] for o in new]), np.array(spaces),
+                                  sim.threat.xt_many(E) - sim.threat.xt_at(x.bx, x.by))
+        for o, f in zip(new, F):
+            o.feat = f
 
 
 def _take_on(sim, x: _Ctx, opts) -> None:
@@ -755,6 +909,15 @@ def _clearance(sim, x: _Ctx, opts, force: bool = False) -> None:
     opts.append(Opt("clear", None, lx, ly, 1.0, v, 0.0, 0.0, None))
 
 
+def vision_offset(sim, c: int, dist) -> np.ndarray:
+    """視野對遠距離傳球的偏移（logit）：資料擬合的選擇模型描述的是平均視野的球員，視野比基準（R）高的球員
+    更常找到遠處的隊友、低的更少。只有遠距離（vision_dist 以上，之後 vision_ramp 公尺內漸增到滿）的選項受影響
+    （情境決定屬性價值）；近處的傳球隊友看得到，視野不改變選擇。係數與其他能力偏移同一量級（模型假設）。"""
+    d = sim.p.decision
+    far = np.clip((np.asarray(dist, float) - d.vision_dist) / d.vision_ramp, 0.0, 1.0)
+    return d.k_vision * (sim.eff[c, ATTR.VISION] - sim.R) / 10 * far
+
+
 def _select(sim, x: _Ctx, opts) -> Opt:
     d = sim.p.decision
     c = x.c
@@ -774,6 +937,12 @@ def _select(sim, x: _Ctx, opts) -> Opt:
     ref = max(abs(float(raw.max())), d.u_floor)
     u = raw + bias * ref
     temp = d.t_rel * (1.5 - dec / 100) * stress * ref
+    nested = sim.p.pass_choice.enabled and any(o.kind == "pass" and o.feat is not None for o in opts)
+    if not nested:        # 定位球發球：沒有資料擬合的傳球對象模型，視野直接偏移各傳球選項的效用（logit × 溫度）
+        isp = np.array([o.kind == "pass" for o in opts])
+        if isp.any():
+            dd = np.hypot(np.array([o.x for o in opts]) - x.bx, np.array([o.y for o in opts]) - x.by)
+            u = u + np.where(isp, vision_offset(sim, c, dd), 0.0) * temp
     w = np.exp((u - u.max()) / temp)
     w /= w.sum()
     k = int(sim.rng_dec.choice(n, p=w))
@@ -791,5 +960,6 @@ def _select(sim, x: _Ctx, opts) -> Opt:
     beta = np.array([getattr(pc, f) for f in PASS_CHOICE_FEATURES])
     m = 1.0 + pc.k_dec * (dec - sim.R) / 100
     ub = m * (np.vstack([opts[i].feat for i in cand]) @ beta)
+    ub = ub + vision_offset(sim, c, [math.hypot(opts[i].x - x.bx, opts[i].y - x.by) for i in cand])
     wb = np.exp(ub - ub.max())
     return opts[cand[int(sim.rng_dec.choice(len(cand), p=wb / wb.sum()))]]

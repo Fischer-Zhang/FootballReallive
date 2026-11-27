@@ -79,6 +79,9 @@ shape:                       # §4.4 陣型快照
   move_sigma: 5.0                        # 無球跑位候選點的離散度(m)
   front_band: 3.0                        # 陣型位置在越位線前 3 m 內者為「壓線前鋒」
   front_sigma_x: 0.3                     # 壓線前鋒的縱向移動幅度倍數（主要沿防線橫移）
+  att_lateral: true                      # 攻方橫向站位取 360 資料的分布（false = 陣型模板的固定橫向位置）
+  att_lateral_drift: 0.25                # 橫向抽籤每次決策的漂移幅度（0–1 的尺度；約 3 m 的橫向移動，模型假設）
+  att_lateral_file: att_lateral.yaml     # 橫向分布（360 資料，fit360 產生）
   box_run_file: box_runs.yaml            # 禁區跑位的真實站位組合（360 資料，fit360 產生）
   box_zone_x: 80.0                       # 禁區跑位區域：x ≥ 80 m、|y−34| ≤ 22 m（與 fit360 的真實站位相同定義）
   box_zone_half: 22.0
@@ -117,7 +120,8 @@ shape:                       # §4.4 陣型快照
   press_cut_dist: 2.0                    # 貼防接應點時站在接應者與球之間的距離(m)
   press_extra_range: 4.0                 # 額外逼搶者最多從比上搶距離再遠 4 m 處趕來
   press_min_dist: 1.2
-  always_engage: 32.0                    # 球距本方球門 32 m 內一定有人上前封堵
+  press_trigger: [1.5, 2.0, 2.5, 3.5, 4.5]   # 依壓迫 1–5：最近的防守者離球多近(m)才會上前逼搶（觸發距離的基礎值；以 360 的最近防守者分布校準，壓迫等級間的比例屬模型假設）
+  press_trigger_danger: 60.0             # 觸發距離再加 威脅(xT) × 此值(m)：越危險的位置越不能放任持球者（以 360 校準）
   jockey_min: 1.0                        # 貼身防守距離 = min + span × (1 − 壓迫強度)（360：持球者與最近對手距離的分布校準）
   jockey_span: 1.5
   jockey_box: 0.5                        # 禁區內貼身距離的倍數
@@ -125,8 +129,7 @@ shape:                       # §4.4 陣型快照
   cover_dist: 5.0                        # 補位者在貼身者後方的距離
   cover_lat: 1.5                         # 補位者偏向自己那一側的距離(m)
   cover_keep_mark: 15.0                  # 補位者若正盯著離球 15 m 內的進攻者，就不離開去補位
-  press_reach_base: 3.0                  # 持球者觸球後到出腳前，上搶者能再逼近的距離(m)（360：持球者受壓分布校準）
-  press_reach_phi: 0.0
+  press_effort: 1.85                     # 逼搶強度 phi 對逼近速度的影響：不逼搶時慢慢靠近（phi 0.08）是衝刺速度的一半（慢跑 vs 衝刺），壓迫 5 級約 1.4 倍；逼近速度與反應時間見 passing.arrive_speed／arrive_react
   mentality_press: 0.8                   # 比分情境的心態偏移對壓迫等級的影響
   def_narrow: 0.25                       # 球靠近本方禁區時防線往中路收縮的比例
   move_speed_frac: 0.8                   # 事件之間的移動速度 = 最高速 × 此比例 × 體能（防守方再乘投入度）
@@ -142,8 +145,9 @@ decision:                    # §4.6；偏好只保留戰術指示（directness�
   kappa: 1.0
   kappa_mentality: 0.12
   counter_bonus: 0.5
-  vision_dist: 30.0
-  vision_base: 20.0
+  vision_dist: 30.0                      # 視野只偏移遠距離傳球：從 30 m 起、之後 vision_ramp 公尺內漸增到滿（模型假設）
+  vision_ramp: 20.0
+  k_vision: 0.35                         # 視野每 +10，遠距離傳球的 logit +0.35（與傳球能力 passing.k_att 同量級；模型假設）
   directness_bias: 0.08
   tempo_bias: 0.04
   shot_policy: 0.12
@@ -158,7 +162,6 @@ passing:
   byline_fail_corner: 0.116              # 資料：落點 x ≥ 95 m 的失敗傳球變角球的比例
   byline_x: 95.0
   k_att: 0.35                            # 傳球能力每 +10，成功率 logit +0.35（模型假設）
-  c_lane: 1.6                            # 僅身後球的執行成功率使用（一般傳球改用 pass_success）
   lane_sigma0: 1.0
   lane_sigma_per_m: 0.08                 # 球飛得越遠，防守者越有時間橫移攔截
   arrive_speed: 4.0                      # 到達壓力：球飛行時防守者朝接球點逼近的速度（m/s；360 擬合時 2/4/6 中概似最高）
@@ -175,6 +178,53 @@ passing:
   ft_press: 1.0
   ft_k: 0.30
   out_share: 0.25
+
+through_propensity:                      # 身後球的嘗試機率（logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）；選哪個接球者、球送多深由效用比較決定
+  g0: -4.0
+  g_x: 0.1
+  g_wide: 0.0
+  g_near: 0.0
+  g_run: 0.0
+  g_gap: 0.0
+  align: 0.0
+  k_skill: 0.15                          # 傳球者的直塞複合能力每 10 點
+  k_policy: 0.3                          # 戰術 directness 每 1 級
+  k_trait: 0.8                           # 特質「愛送殺球」
+
+through_choice:                          # 身後球傳給哪一位接球者（條件 logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）
+  dist: 0.0
+  dist2: 0.0
+  lat: 0.0
+  lat_gap: 0.0
+  depth: 0.0
+  space: 0.0
+  lane: 0.0
+  k_dec: 1.0                             # 假設：決策每 +10，越接近資料中的選擇方式（係數放大 10%）；與傳球對象、帶球方向相同
+
+carry_choice:                            # 帶球的方向與距離（條件 logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）
+  enabled: true                          # false＝舊行為（以 xT 效用比較）
+  fwd: 0.0                               # 終點每往前 10 m
+  back: 0.0                              # 往回（> 2 m）
+  len: 0.0                               # 帶球距離每 10 m
+  lat_in: 0.0                            # 往中路的橫向位移每 10 m
+  lat_abs: 0.0                           # 橫向位移（絕對值）每 10 m
+  space: 0.0                             # 終點最近防守者的距離每 5 m（上限 10 m）
+  xt_gain: 0.0                           # xT 增益每 0.05
+  end_dy: 0.0                            # 終點離中路每 10 m
+  fwd_own: 0.0
+  fwd_final: 0.0
+  lat_final: 0.0
+  dy_final: 0.0
+  in_box: 0.0                            # 終點在禁區內
+  lat_wide: 0.0                          # 往中路的橫向位移 × 持球者離中路程度
+  fwd_wide: 0.0
+  back_wide: 0.0
+  space_final: 0.0
+  len_final: 0.0
+  k_dec: 1.0                             # 假設：決策每 +10，越接近資料中的選擇方式（係數放大 10%）
+  k_trait: 0.8                           # 特質「內切」對往中路選項的 logit 加成（與其他傾向的 k_trait 相同）
+  k_directness: 0.15                     # 戰術 directness 每 1 級，終點每往前 10 m 的 logit 增減（戰術指示；模型假設）
+  k_width: 0.15                          # 戰術 width 每 1 級，終點每離中路 10 m 的 logit 增減（戰術指示；模型假設）
 
 carry_propensity:                        # 帶球 ≥ 3 m 的傾向（logit；StatsBomb 360 擬合，fitted360.yaml 覆蓋）
   g0: -3.62
@@ -215,25 +265,23 @@ pass_height:                             # 傳球高度的選擇（踢高球的�
   k_buildup: 0.5                         # 戰術「長傳出球／短傳出球」在本方三區的 logit 增減（模型假設）
 
 through:
-  difficulty: 70
-  depth: 10.0
-  min_space: 6.0
-  b0: 1.4
-  b_dist: 0.045
+  depths: [4.0, 8.0, 12.0, 16.0]         # 球送到接球者前方多深（候選；傳球者依各深度的成功率與價值選擇，不再固定在防線後 10 m）
+  goal_line_margin: 1.5                  # 球最深送到離底線 1.5 m（再深就出界）
+  min_space: 3.0                         # 防線後到底線之間至少要有的空間(m)才會考慮身後球
   att_react: 0.20
   def_react: 0.40
   gk_react: 0.35
   gk_handicap: 0.15
   race_noise: 0.15
-  offside_b0: -1.3
+  offside_b0: -3.2                       # 落點在防線後的傳球，真實被判越位只有 2.6%（360，n=1,286）；以此校準（原手設 −1.3 約 21%）
   offside_k: 0.30
   offside_trap: 0.5
-  max_options: 3
+  max_options: 6                         # 候選接球者上限（只為限制計算量；360 的接球者定義沒有上限，多數狀態 1–3 人）
   breakaway_v0: 0.35                     # 單刀價值 = v0 × exp(−距離/scale)
   breakaway_scale: 40.0
 
 carry:
-  max_dist: 12.0
+  max_dist: 20.0                         # 單次帶球的安全上限（想帶多遠 = 帶球速度 × 持球時間，約 4–13 m）
   min_dist: 3.0
   stop_short: 1.0                        # 在對手能搶到的那一點之前停下（m）
   step: 0.5                              # 路線取樣間距（m）
@@ -241,7 +289,7 @@ carry:
   reach: 1.0                             # 觸球（伸腳）範圍（m）
   jockey_range: 4.0                      # 持球者與球門之間、此距離內的貼身者邊退邊守，不參與路線封堵（360）
   speed_frac: 0.75                       # 帶球速度 = 最高速 × 0.75
-  angles: [0.0, 0.55, -0.55, 1.25, -1.25]
+  angles: [0.0, 0.5236, -0.5236, 1.0472, -1.0472, 1.5708, -1.5708, 2.0944, -2.0944, 2.618, -2.618, 3.1416]   # 每 30° 一個方向（含橫向與往回；真實有 5–22% 的帶球往回）
   attempt_b0: 1.2
   attempt_per_m: 0.45
   base_tackle: 0.40

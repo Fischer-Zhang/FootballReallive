@@ -203,7 +203,7 @@ def _through(sim, T, c, pos, opt) -> Outcome:
 # ------------------------------------------------------------------ 帶球與過人
 def _carry(sim, T, c, pos, opt) -> Outcome:
     cp, rng, C = sim.p.carry, sim.rng_act, sim.C
-    p_att, p_tk, dist = opt.data
+    p_att, p_tk, dist = opt.data[:3]
     k = opt.target
     bx, by = float(pos[c, 0]), float(pos[c, 1])
     ex, ey = opt.x, opt.y

@@ -10,8 +10,9 @@ _samples:
 _pass_choice_fit:
   _n_passes: 33179
   _mean_options: 6.98
-  _loglik: -1.2918
-  _loglik_uniform: -1.9122
+  _loglik: -1.4516
+  _loglik_uniform: -1.9165
+  _mean_weight: 1.25
 _pass_success_fit:
   _n: 22927
   _n_all: 40095
@@ -24,10 +25,10 @@ _pass_height_fit:
   _lofted_weighted%: 18.1
   _weighted_logloss: 0.3314
 shot_propensity:
-  a0: 4.3843
-  a_dist: -0.1129
-  a_logang: 2.9766
-  a_near: 0.2236
+  a0: 4.6837
+  a_dist: -0.1238
+  a_logang: 3.1754
+  a_near: 0.225
 cross_propensity:
   c0: -0.2841
   c_depth: -0.1443
@@ -39,16 +40,16 @@ clear_propensity:
   k_wide: -0.0814
   k_near: -0.4447
 pass_choice:
-  dx: 0.3726
-  dist: -1.6241
-  dist2: 0.0672
-  space: 1.3824
-  lane: -1.0633
-  back: -0.1896
-  gk: 0.2667
-  xt_gain: 0.8517
-  dx_own: 0.0543
-  dx_final: 0.0547
+  dx: 0.3854
+  dist: -1.7493
+  dist2: 0.1823
+  space: 1.3843
+  lane: -0.8989
+  back: -0.1012
+  gk: 0.4137
+  xt_gain: 0.7691
+  dx_own: 0.1266
+  dx_final: 0.0792
 pass_success:
   s0: 4.9125
   s_d: 0.0165
@@ -78,3 +79,56 @@ carry_propensity:
   g_wide: 0.0508
   g_near: 0.2664
   g_space: 0.0954
+_carry_choice_fit:
+  _n_carries: 17320
+  _n_states: 18266
+  _mean_options: 10.7
+  _loglik: -2.132
+  _loglik_uniform: -2.356
+carry_choice:
+  fwd: 1.4877
+  back: -0.9792
+  len: -0.1303
+  lat_in: 0.2106
+  lat_abs: -0.7428
+  space: 1.3931
+  xt_gain: -0.5626
+  end_dy: 0.9096
+  fwd_own: 0.0042
+  fwd_final: -0.281
+  lat_final: 0.5114
+  dy_final: -0.0055
+  in_box: -0.0729
+  lat_wide: 0.645
+  fwd_wide: 0.017
+  back_wide: 0.4695
+  space_final: -0.9442
+  len_final: -0.0031
+_through_propensity_fit:
+  _n: 34830
+  _rate%: 9.67
+through_propensity:
+  g0: 1.2901
+  g_x: -0.2841
+  g_wide: -0.1339
+  g_near: 0.0415
+  g_run: 0.1095
+  g_gap: -1.2042
+_through_choice_fit:
+  _n_passes: 1970
+  _mean_options: 2.88
+  _loglik: -0.7209
+  _loglik_uniform: -0.9395
+through_choice:
+  dist: -3.1356
+  dist2: 0.2082
+  lat: -0.078
+  lat_gap: 0.5163
+  depth: 2.1086
+  space: 0.4146
+  lane: -0.0595
+_shot_propensity_fit:
+  _n: 5357
+  _shot_rate%: 10.42
+  _shot_rate_visible%: 18.74
+  _shot_rate_all%: 10.42

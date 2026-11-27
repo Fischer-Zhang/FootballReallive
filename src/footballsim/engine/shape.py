@@ -9,6 +9,7 @@ import json
 import math
 
 import numpy as np
+import yaml
 
 from ..config import CONFIG_DIR
 from ..model.attributes import ATTR
@@ -53,6 +54,78 @@ def box_pool(sim):
     return pool
 
 
+def lateral_pool(sim):
+    """攻方橫向站位（config/att_lateral.yaml，由 360 資料產生）：{組別: 機率 (球 x 分區, 球離中線分組, 橫向格)}、橫向格邊界"""
+    pool = getattr(sim.p, "_att_lateral", None)
+    if pool is None:
+        path = CONFIG_DIR / sim.p.shape.att_lateral_file
+        pool = {}
+        if path.exists():
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            pool = {"edges": np.asarray(doc["edges"], float),
+                    **{g: np.asarray(doc[g], float) for g in ("ahead", "level", "def_near", "def_far", "def_level")},
+                    "zone_c": np.asarray([17.5, 52.5, 87.5]), "ball_c": np.asarray([2.0, 6.5, 12.0, 18.5, 28.0])}
+        sim.p._att_lateral = pool
+    return pool
+
+
+def reflect01(u: np.ndarray) -> np.ndarray:
+    """把數值反射回 [0, 1]（反射隨機漫步的平穩分布是均勻分布）"""
+    u = np.mod(u, 2.0)
+    return np.where(u > 1.0, 2.0 - u, u)
+
+
+def _interp_weights(centers: np.ndarray, v: float) -> np.ndarray:
+    w = np.zeros(len(centers))
+    if v <= centers[0]:
+        w[0] = 1.0
+    elif v >= centers[-1]:
+        w[-1] = 1.0
+    else:
+        k = int(np.searchsorted(centers, v)) - 1
+        t = (v - centers[k]) / (centers[k + 1] - centers[k])
+        w[k], w[k + 1] = 1.0 - t, t
+    return w
+
+
+def _lateral(sim, p, pos, players, bx: float, by: float, rules, width_scale: float, rng) -> None:
+    """橫向站位（360 資料）：球員不是站在陣型的固定橫向位置，而是散在球場寬度上、並往球所在側偏
+    （攻方球前方 8 m 以上的隊友平均偏 +8 m（球在 +28 m 時），半空間和邊路都有人；防守方比較緊湊，標準差約 12 m）。
+    做法與縱向層次相同：陣型只決定誰在左、誰在右（依陣型模板的橫向順序），實際的橫向位置取資料分布
+    （依球的 x 分區與離中線的距離）的分位數；width_scale 為戰術對整體橫向散布的縮放。
+    rules = [(組別, 相對球的縱向下限, 上限)]：依球員相對球的縱向位置分組，各組用各自的分布；不在任何組的球員維持原位置。
+    分位數是分層抽樣：第 i 名（共 n 名）取 (i + u)/n，u 是每名球員自己的 0–1 抽籤（隨時間緩慢漂移、在 0 與 1 反射，
+    維持均勻分布），所以長期下來球員的橫向位置服從資料分布，而短時間內不會每次決策都跳來跳去。"""
+    pool = lateral_pool(sim)
+    if not pool or not len(players):
+        return
+    wz = _interp_weights(pool["zone_c"], bx)
+    wb = _interp_weights(pool["ball_c"], abs(by - CY))
+    sg = 1.0 if by >= CY else -1.0
+    edges = pool["edges"]
+    pl = np.asarray(players)
+    dx = pos[pl, 0] - bx
+    u_all = getattr(sim, "_lat_u", None)
+    if u_all is None:
+        u_all = sim._lat_u = rng.random(22)
+    u_all[pl % 22] = reflect01(u_all[pl % 22] + rng.normal(0.0, p.att_lateral_drift, len(pl)))
+    for g, lo, hi in rules:
+        idx = pl[(dx >= lo) & (dx < hi)]
+        if len(idx) == 0:
+            continue
+        pdf = np.einsum("i,j,ijk->k", wz, wb, pool[g])
+        cdf = np.concatenate([[0.0], np.cumsum(pdf)])
+        cdf /= cdf[-1]
+        order = np.argsort(sg * (pos[idx, 1] - CY))                 # 由遠離球的一側排到球所在側
+        q = (np.arange(len(idx)) + u_all[idx[order] % 22]) / len(idx)
+        lat = np.clip(np.interp(q, cdf, edges) * width_scale, -(CY - 1.0), CY - 1.0)
+        pos[idx[order], 1] = CY + sg * lat
+
+
+ATT_LATERAL_RULES = [("ahead", 8.0, 1e9), ("level", -8.0, 8.0)]
+DEF_LATERAL_RULES = [("def_near", 8.0, 24.0), ("def_far", 24.0, 1e9), ("def_level", -8.0, 8.0)]
+
+
 def _box_runs(sim, p, pos, movers, bx, by, rng) -> set:
     """球在前場時，從真實畫面中找持球位置相近者，讓禁區＋前沿（x ≥ box_zone_x、|y−34| ≤ box_zone_half）
     的攻方人數與站位照那個真實畫面：已在區域內的人優先佔真實站位，不夠再由最前面的隊友補上；
@@ -88,6 +161,16 @@ def _box_runs(sim, p, pos, movers, bx, by, rng) -> set:
         if s not in assigned:
             pos[s, 0] = p.box_zone_x - 0.5
     return assigned
+
+
+def _close_reach(sim, p, s: int, hold: float, phi: float) -> float:
+    """防守者 s 在持球者的持球時間 hold 內能逼近多遠（m）：逼近速度 ×（持球時間 − 反應時間）。
+    逼近速度與反應時間與傳球的「到達壓力」共用（passing.arrive_speed、arrive_react，360 擬合）；
+    再依防守者的速度、預判與逼搶強度 phi（壓迫戰術、逼搶能力、體能）調整。"""
+    pp = sim.p.passing
+    v = pp.arrive_speed * sim.vmax[s] / sim.v_ref * (1.0 + p.press_effort * (phi - p.press_phi[2]))
+    react = pp.arrive_react - 0.0025 * (sim.eff[s, ATTR.ANTICIPATION] - sim.R)
+    return max(float(v) * (hold - react), 0.0)
 
 
 def _att_ranks(p, pos, mv, bx: float, x_line: float, rng) -> None:
@@ -139,6 +222,8 @@ def compute(sim, T: int, bx: float, by: float, carrier, set_piece: bool = False)
         gy = CY + (oop[:, 1] - CY) * narrow + p.def_shift * (dby - CY)
         pos[d_out, 0] = LENGTH - gx
         pos[d_out, 1] = WIDTH - gy
+        if p.att_lateral:
+            _lateral(sim, p, pos, d_out, bx, by, DEF_LATERAL_RULES, p.def_width / 0.80, rng)
     if gk_d is not None:
         gx = min(p.gk_x_min + p.gk_x_ratio * dbx, p.gk_x_max)
         pos[gk_d, 0] = LENGTH - gx
@@ -160,6 +245,9 @@ def compute(sim, T: int, bx: float, by: float, carrier, set_piece: bool = False)
         pos[t_out, 0] = back_a + np.minimum(xr, 1.0) * (front - back_a)
         pos[t_out, 1] = CY + (ip[:, 1] - CY) * width + p.att_shift * (by - CY)
         _att_ranks(p, pos, [s for s in t_out if s != carrier], bx, x_max, rng)
+        if p.att_lateral:
+            _lateral(sim, p, pos, [s for s in t_out if s != carrier], bx, by, ATT_LATERAL_RULES,
+                     width / interp(p.att_width, 3), rng)
     if gk_t is not None:
         pos[gk_t, 0] = min(max(2.0 + 0.22 * bx, 2.0), 28.0)
         pos[gk_t, 1] = CY + 0.1 * (by - CY)
@@ -274,13 +362,24 @@ def compute(sim, T: int, bx: float, by: float, carrier, set_piece: bool = False)
             # 壓迫強度與壓迫能力越高，貼得越近；在本方危險區域一律上前封堵。
             # 比分情境：落後方加強前場壓迫，領先方退守
             press = tD.tactics.press + p.mentality_press * tD.mentality_offset
-            engaged = dbx <= max(interp(p.press_engage, press), p.always_engage)
+            # 逼搶有兩個條件：球在壓迫高度內（戰術 press_engage），而且最近的防守者離球在「觸發距離」內才會上前。
+            # 觸發距離 = 壓迫戰術的基礎距離 + 威脅（xT）× 增益（越危險的位置越不能放任持球者），再乘上這名防守者
+            # 的逼搶意願（逼搶能力）。球在觸發距離外時沒有人衝上去，持球者就有空間（防守方留在陣型與盯人位置）。
+            engaged = False
+            if dbx <= interp(p.press_engage, press):
+                i0 = int(np.argmin(dd))
+                trigger = ((interp(p.press_trigger, press) + p.press_trigger_danger * sim.threat.xt_at(bx, by))
+                           * (1.0 + 0.004 * (sim.comp[d_out[i0], C.PRESS] - sim.R)))
+                engaged = bool(dd[i0] <= trigger)
             phi0 = interp(p.press_phi, press) if engaged else p.press_phi_passive
             gxv, gyv = LENGTH - bx, CY - by
             gn = math.hypot(gxv, gyv) or 1.0
             ux, uy = gxv / gn, gyv / gn
             # 不逼搶時（球離本方球門夠遠、壓迫戰術低）不派人上前，持球者可以很空（360：本方三區約三分之一的傳球
-            # 最近對手在 6 m 外）；逼搶時一人貼身、一人補位，另依壓迫戰術派人貼住離球最近的接應點（切斷傳球路線）
+            # 最近對手在 6 m 外）；逼搶時一人貼身、一人補位，另依壓迫戰術派人貼住離球最近的接應點（切斷傳球路線）。
+            # 上搶者能逼近多遠是物理量：持球者在這段時間內出手（hold），防守者反應後以逼近速度趕過去，
+            # 所以離球遠的防守者來不及，持球者就有空間；速度、預判、逼搶意願與體能都有作用。
+            hold = sim.hold_time()
             pressers = np.argsort(dd)[:2] if (engaged or p.press_passive) else np.zeros(0, dtype=int)
             for rank, i in enumerate(pressers):
                 s = d_out[i]
@@ -304,7 +403,7 @@ def compute(sim, T: int, bx: float, by: float, carrier, set_piece: bool = False)
                 need = math.hypot(dx, dy)
                 if need < 1e-6:
                     continue
-                reach = (p.press_reach_base + p.press_reach_phi * phi) * (1.0 if rank == 0 else 0.7)
+                reach = _close_reach(sim, p, s, hold, phi) * (1.0 if rank == 0 else 0.7)
                 frac = min(1.0, reach / need)
                 pos[s, 0] += dx * frac
                 pos[s, 1] += dy * frac
@@ -328,7 +427,7 @@ def compute(sim, T: int, bx: float, by: float, carrier, set_piece: bool = False)
                     dx, dy = tx - pos[k, 0], ty - pos[k, 1]
                     need = math.hypot(dx, dy)
                     phi = min(max((phi0 + 0.004 * (sim.comp[k, C.PRESS] - sim.R)) * (0.7 + 0.3 * sim.energy[k]), 0.0), 0.8)
-                    reach = p.press_reach_base + p.press_reach_phi * phi
+                    reach = _close_reach(sim, p, k, hold, phi)
                     if need > reach + p.press_extra_range:
                         continue
                     frac = min(1.0, reach / max(need, 1e-6))

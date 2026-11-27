@@ -63,13 +63,16 @@ def save_xt(grid: np.ndarray, info: dict, path: Path = CONFIG_DIR / "xt_grid.yam
 
 
 # ------------------------------------------------------------------ 邏輯斯迴歸（IRLS，無需 scipy）
-def logistic_fit(X: np.ndarray, y: np.ndarray, l2: float = 1e-4, n_iter: int = 100) -> np.ndarray:
+def logistic_fit(X: np.ndarray, y: np.ndarray, l2: float = 1e-4, n_iter: int = 100,
+                 sw: np.ndarray | None = None) -> np.ndarray:
+    """牛頓法的邏輯迴歸；sw 為各樣本的權重（例如校正樣本選擇偏誤的反向抽樣權重）"""
     w = np.zeros(X.shape[1])
+    sw = np.ones(len(y)) if sw is None else np.asarray(sw, float)
     for _ in range(n_iter):
         p = 1 / (1 + np.exp(-(X @ w)))
-        W = p * (1 - p)
+        W = p * (1 - p) * sw
         H = X.T @ (X * W[:, None]) + l2 * np.eye(len(w))
-        step = np.linalg.solve(H, X.T @ (y - p) - l2 * w)
+        step = np.linalg.solve(H, X.T @ (sw * (y - p)) - l2 * w)
         w += step
         if np.abs(step).max() < 1e-9:
             break
